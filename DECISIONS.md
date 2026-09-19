@@ -187,3 +187,169 @@ characters, largest 7,291 (Annex III).
   same reasoning as `fetch_source.py`: parsing and indexing have different
   failure modes and different reasons to re-run, and only indexing needs an API
   key.
+
+## Phase 2 — index and CLI retrieval (2026-09-19)
+
+### Scope
+
+- **Vector-only retrieval now; `rank_bm25` deferred** — fusing a lexical and a
+  dense ranking needs a weight, and a weight chosen before there is a recall
+  number to move is chosen by taste. `search()` returns a ranked list of
+  scored candidates, which is the shape a fusion step consumes, so BM25 adds
+  a function rather than rewriting `retrieve.py`.
+- **The eval ships with retrieval, not after it** — choosing vector-first to
+  establish a baseline only pays off if the baseline is measured, and
+  CLAUDE.md's "report recall@5 before and after" is unenforceable until
+  `evals/run_eval.py` exists.
+
+### Deployment
+
+- **`data/index/` is committed; the `.gitignore` entry was removed** —
+  CLAUDE.md requires the app to open a prebuilt index read-only and forbids
+  building at startup. A host that deploys straight from the repository has no
+  build step and no persistent disk, so those two rules can only both hold if
+  the index is in the repository. Measured at **12.9 MB**, well under
+  GitHub's limits. Committing the index removes the build step, not the API
+  key: the app still embeds each incoming question at runtime.
+- **`scripts/build_index.py` writes `data/index/index_manifest.json`** —
+  recording embed model, chunk count, build time and the sha256 of
+  `chunks.jsonl`. A committed binary reveals nothing in a diff, so "are these
+  vectors current for these chunks?" would otherwise be unanswerable by
+  inspection. Mirrors `data/raw/manifest.json`.
+- **A full rebuild every time, never incremental** — measured at ~170,600
+  tokens, about **$0.0034** per rebuild. Reasoning about which chunks changed
+  costs more than that, and an incremental index that quietly retains a
+  deleted chunk is a citation to a provision that no longer exists.
+- **`build()` deletes the whole index directory rather than calling
+  `delete_collection`** — `delete_collection` drops the collection from
+  sqlite but leaves its HNSW segment directory on disk. Measured: three
+  rebuilds left three directories. With the index committed, each orphan is
+  ~600 KB of dead binary that git keeps forever. The delete is guarded so it
+  only ever removes a directory that actually holds an index; a mistyped
+  `INDEX_DIR` pointing at real work raises instead.
+- **`build()` closes its Chroma client in a `finally`** — Chroma holds the
+  sqlite file and every segment open for the client's lifetime, and on
+  Windows an open handle makes the directory undeletable. Leaving the client
+  open does not break the build that opened it; it breaks the *next* one, so
+  the symptom appears a step away from the cause. Measured directly: deleting
+  an orphaned segment while a client is alive fails with `PermissionError`.
+
+### Two Chroma defaults that fail silently
+
+- **The collection is created with `configuration={"hnsw": {"space":
+  "cosine"}}`** — Chroma 1.5.9 falls back to `l2` when no space is declared
+  (`collection_configuration.py:442`). OpenAI embeddings are normalised for
+  cosine; built in l2 the index still returns five results, just worse ones,
+  and nothing raises.
+- **Every `create_collection` and `get_collection` call passes
+  `embedding_function=None`** — the default is `ONNXMiniLM_L6_V2`, and
+  `onnxruntime` is already installed as a Chroma transitive. Left in place, a
+  `query_texts=` call would embed the question with MiniLM and compare it
+  against OpenAI document vectors — two unrelated spaces, no error — and would
+  download an ~80 MB model on first use, a cold-start failure on a deployed
+  host that never reproduces locally.
+- **The resulting `{"type": "legacy"}` deprecation warning is filtered in the
+  three tests that read the collection config, not globally** — verified that
+  the build, open and query path never reads that config and is warning-free.
+  A global filter would hide the warning if it started appearing somewhere new.
+
+### Modules
+
+- **`core/embed.py` exists although the documented layout does not name it** —
+  indexing embeds 886 chunks offline and every query embeds one question at
+  runtime, so putting the client in either `index.py` or `retrieve.py` would
+  make the other depend on it for the wrong reason. `Embedder` is a Protocol
+  and `OpenAIEmbedder` takes its client as a field, which is what lets the
+  whole suite run with no network.
+- **The OpenAI SDK is called directly rather than through `langchain-openai`**
+  — one fewer layer between the reader and the HTTP call, and nothing in
+  LangGraph requires LangChain's embedding wrapper. `langchain-openai` stays
+  pinned for the generation phase.
+- **No retry logic of our own** — the OpenAI client already retries transient
+  failures, and a second layer would obscure which one caused a slow build.
+- **Batched embedding sorts each response by the `index` the API reports** —
+  the documented behaviour is that order is preserved, but a mismatch would
+  file every vector under the wrong chunk and raise nothing. The sort is free.
+- **Cosine distance is converted to a similarity once, in `search()`** —
+  `score = 1 - distance`. Every surface above retrieval wants "higher is
+  better"; converting in each caller means each caller gets the direction
+  right by luck.
+- **`Hit` is frozen** — it travels from retrieval through generation to the
+  UI, and a stage that adjusted a score in passing would be very hard to find.
+- **`build()` takes a `progress` callback** — the real build is nine paid API
+  calls over about a minute, and in silence a hang is indistinguishable from
+  slowness.
+- **Chunk metadata is derived by subtracting `id`, `text` and `embed_text`
+  from the record** — so a field added to the chunker reaches the index
+  without an edit in `index.py`.
+
+### Logging
+
+- **`logs_dir` was added to `Config`; the log is `data/logs/queries.jsonl`,
+  gitignored** — CLAUDE.md requires logging every query and requires all
+  configuration to flow through `core/config.py`. The log is a local runtime
+  artefact rather than a corpus artefact, and it carries user questions.
+- **`rewritten` is written as `null` rather than omitted** — no rewrite node
+  exists yet. Present-and-null keeps the log format stable; an absent key
+  would mean every existing line needed special-casing once the graph lands.
+- **Chunk text is not logged, only ids and scores** — the ids identify the
+  text exactly, and a log that duplicates the corpus is one nobody reads.
+
+### Evals
+
+- **Gold is keyed on chunk id, not on the `article_no` label** — ids are the
+  collection's primary key and match exactly. Matching labels would need
+  prefix logic, and "Article 6" is a prefix of "Article 60".
+- **`run_eval.py` verifies every gold id exists in the index before spending
+  anything** — a typo in `expect` is indistinguishable from a retrieval
+  failure once the numbers are printed. It just looks like a miss.
+- **No threshold is enforced and a low score does not exit non-zero** — a
+  quality bar encoded as a build failure is a bar people learn to route
+  around. The obligation is to report the number, including when it worsens.
+- **Misses print what came back instead, and flag gold found below the cut** —
+  a gold chunk just outside the cut is a re-ranking or `k` problem; one absent
+  entirely is an embedding problem. An aggregate number distinguishes neither.
+- **MRR is truncated at `k` like recall is** — otherwise every row of a sweep
+  prints the same number, since the rank of the first gold chunk does not
+  depend on how many results were displayed.
+- **The question set is split into `statutory` and `lay` groups, and the
+  report breaks down by group** — the first 28 questions use the Act's own
+  vocabulary, and because every chunk is embedded with its citation header
+  attached they match on terminology almost for free: recall@5 over that
+  subset alone saturated at **1.00**, leaving nothing for a later change to
+  move. Eight questions asking the same subject matter in plain language were
+  added for that reason, and the split is what makes the eval able to
+  discriminate at all.
+
+### Measured baseline — vector-only, `text-embedding-3-small`, top_k=5
+
+Over 36 questions: **recall@5 0.83, recall@1 0.53, MRR@5 0.650.** By group:
+
+| group | n | recall@5 | MRR@5 |
+|---|---|---|---|
+| statutory | 28 | 1.00 | 0.783 |
+| lay | 8 | 0.25 | 0.188 |
+
+Recall plateaus at 0.92 by k=10 and does not improve through k=20.
+
+- **The dominant failure mode is recitals outranking articles on lay-phrased
+  questions** — recitals are discursive prose and match conversational
+  phrasing better than terse statutory text does, so they fill the top 5 while
+  the operative Article sits below the cut. Four of the top five results for
+  "can my company use AI to sift job applications" are recitals.
+
+### Testing
+
+- **`tests/test_config.py` holds regression guards, not test-driven design** —
+  `core/config.py` already satisfied every assertion. Each pins a Phase 0
+  decision that is cheap to undo by accident: a `.get()` with a default
+  replacing `_require`, or a lost `field(repr=False)` printing the API key
+  into the per-query log.
+- **The fake embedder is a bag of words over a fixed vocabulary, not a hash**
+  — hashed vectors are deterministic but arbitrary, so an assertion about
+  which chunk ranks first would restate the hash rather than state anything
+  about retrieval. With a bag of words, "which practices are prohibited"
+  really is nearest the prohibitions chunk.
+- **The suite was verified with all outbound sockets blocked and
+  `OPENAI_API_KEY` unset** — 98 tests pass, which makes the no-network rule a
+  measured fact rather than an intention.

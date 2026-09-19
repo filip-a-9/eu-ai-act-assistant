@@ -1,0 +1,247 @@
+# Retrieval eval set for the EU AI Act assistant.
+#
+# Each entry is a question a compliance officer might actually ask, paired with
+# the chunk ids that genuinely answer it. A question counts as recalled when at
+# least one of its `expect` ids appears in the top k.
+#
+# Gold is keyed on chunk **id**, not on the `article_no` label. Ids are the
+# collection's primary key and match exactly; matching on labels would need
+# prefix logic, and "Article 6" is a prefix of "Article 60". The `article_no`
+# field below is for human readers only and is never compared against.
+#
+# `expect` lists alternatives, not a set to be found in full: several
+# provisions can each be a correct landing point for one question. Where a
+# question is genuinely answered by one chunk and one only, the list has one
+# entry, and those are the strictest items here.
+#
+# Two entries expect recitals. Recitals are 180 of 886 chunks and explain the
+# Act's intent, so "why" questions are where they are the right answer rather
+# than noise crowding out an article.
+#
+# Every id below was read out of data/chunks/chunks.jsonl, not recalled from
+# memory. Re-check them if the chunker's granularity ever changes.
+
+- id: prohibited-practices
+  question: Which AI practices are banned outright under the AI Act?
+  expect: [art_5.para_1]
+  article_no: Article 5(1)
+  note: >
+    The strictest item in the set. Article 5(1) carries the chapeau and all
+    the prohibitions; the neighbouring 5(1a) and 5(1b) are narrow gloss on two
+    points and are not an acceptable substitute.
+
+- id: definition-ai-system
+  question: What is the legal definition of an AI system?
+  expect: [art_3.point_1]
+  article_no: Article 3, point (1)
+  note: One definition, one chunk. A near miss here is a different definition.
+
+- id: provider-vs-deployer
+  question: What is the difference between a provider and a deployer?
+  expect: [art_3.point_3, art_3.point_4]
+  article_no: Article 3, points (3) and (4)
+
+- id: high-risk-annex-iii
+  question: When is an AI system high-risk because it appears in Annex III?
+  expect: [art_6.para_2, anx_III]
+  article_no: Article 6(2) / Annex III
+
+- id: high-risk-derogation
+  question: Can a provider argue that an Annex III system is not actually high-risk?
+  expect: [art_6.para_3, art_6.para_4]
+  article_no: Article 6(3)-(4)
+
+- id: risk-management-system
+  question: Is a risk management system required for high-risk AI systems?
+  expect: [art_9.para_1]
+  article_no: Article 9(1)
+
+- id: training-data-governance
+  question: What data governance rules apply to training, validation and testing data?
+  expect: [art_10.para_1, art_10.para_2, art_10.para_3]
+  article_no: Article 10(1)-(3)
+
+- id: record-keeping-logs
+  question: Do high-risk AI systems have to keep logs of their operation?
+  expect: [art_12.para_1]
+  article_no: Article 12(1)
+
+- id: human-oversight
+  question: What human oversight must a high-risk AI system allow for?
+  expect: [art_14.para_1, art_14.para_2, art_14.para_4]
+  article_no: Article 14(1)-(4)
+
+- id: accuracy-and-cybersecurity
+  question: What accuracy, robustness and cybersecurity levels must high-risk systems meet?
+  expect: [art_15.para_1]
+  article_no: Article 15(1)
+
+- id: provider-obligations
+  question: What are the obligations of a provider of a high-risk AI system?
+  expect: [art_16.point_a, art_16.point_b, art_16.point_c]
+  article_no: Article 16, points (a)-(c)
+  note: >
+    Article 16 has no paragraph level, so it splits at its lettered points and
+    any of the opening points is a reasonable landing place.
+
+- id: deployer-obligations
+  question: What must a deployer of a high-risk AI system do?
+  expect: [art_26.para_1]
+  article_no: Article 26(1)
+
+- id: fundamental-rights-impact-assessment
+  question: Who has to carry out a fundamental rights impact assessment?
+  expect: [art_27.para_1]
+  article_no: Article 27(1)
+
+- id: chatbot-disclosure
+  question: Do I have to tell people they are interacting with a chatbot rather than a human?
+  expect: [art_50.para_1]
+  article_no: Article 50(1)
+
+- id: deepfake-labelling
+  question: Does AI-generated or manipulated deepfake content have to be labelled?
+  expect: [art_50.para_2, art_50.para_4]
+  article_no: Article 50(2) and 50(4)
+
+- id: gpai-systemic-risk-threshold
+  question: When does a general-purpose AI model count as having systemic risk?
+  expect: [art_51.para_1, art_51.para_2]
+  article_no: Article 51(1)-(2)
+
+- id: gpai-provider-obligations
+  question: What must providers of general-purpose AI models do?
+  expect: [art_53.para_1]
+  article_no: Article 53(1)
+
+- id: gpai-systemic-risk-obligations
+  question: What extra obligations apply to general-purpose AI models with systemic risk?
+  expect: [art_55.para_1]
+  article_no: Article 55(1)
+
+- id: regulatory-sandbox
+  question: What is an AI regulatory sandbox and what is it for?
+  expect: [art_57.para_1, art_57.para_5, art_57.para_9]
+  article_no: Article 57(1), (5), (9)
+
+- id: serious-incident-deadline
+  question: How quickly must a serious incident be reported to the authorities?
+  expect: [art_73.para_2, art_73.para_3, art_73.para_4]
+  article_no: Article 73(2)-(4)
+
+- id: fine-for-prohibited-practice
+  question: What is the maximum fine for engaging in a prohibited AI practice?
+  expect: [art_99.para_3]
+  article_no: Article 99(3)
+  note: >
+    Deliberately adjacent to Article 99(4), which sets a lower ceiling for
+    other infringements. Returning 99(4) here would be a confidently wrong
+    answer about the money at stake, so only 99(3) counts.
+
+- id: military-exclusion
+  question: Does the Act apply to AI systems used exclusively for military or defence purposes?
+  expect: [art_2.para_3]
+  article_no: Article 2(3)
+
+- id: research-exclusion
+  question: Does the Act cover research and development activity before a system reaches the market?
+  expect: [art_2.para_8]
+  article_no: Article 2(8)
+
+- id: open-source-exclusion
+  question: Does the Act apply to AI systems released under a free and open-source licence?
+  expect: [art_2.para_12]
+  article_no: Article 2(12)
+
+- id: ai-literacy
+  question: Do companies have to ensure their staff are AI literate?
+  expect: [art_4.para_1, art_4.para_2]
+  article_no: Article 4(1)-(2)
+
+- id: application-dates
+  question: When does the Regulation enter into force and start to apply?
+  expect: [art_113.point_a, art_113.point_b, art_113.point_c, art_113.point_d]
+  article_no: Article 113
+
+- id: why-emotion-recognition-restricted
+  question: Why does the Act take issue with AI that infers emotions at work?
+  expect: [rct_44, art_5.para_1]
+  article_no: Recital 44 / Article 5(1)
+  note: A "why" question -- the reasoning lives in the recital, the rule in Article 5.
+
+- id: why-ai-system-defined-this-way
+  question: Why is the definition of an AI system aligned with international work?
+  expect: [rct_12]
+  article_no: Recital 12
+  note: >
+    Intent, not rule. If this misses, recitals are being crowded out by
+    articles and the corpus mix is worth revisiting.
+
+# ---------------------------------------------------------------------------
+# Lay-phrased questions
+#
+# Everything above uses the Act's own vocabulary -- "high-risk", "deployer",
+# "general-purpose AI model". Every chunk is embedded with its citation header
+# attached, so those questions match on terminology almost for free, and
+# recall@5 over that set alone saturates at 1.00 with nothing left to measure.
+#
+# These are the same subject matter asked the way someone who has not read the
+# Regulation would ask it: no statutory terms, a concrete situation, and the
+# answer requiring a hop from plain language to legal category. This is the
+# part of the set that can still get worse, and therefore the part that can
+# show whether a retrieval change helped.
+# ---------------------------------------------------------------------------
+
+- id: lay-cv-screening
+  group: lay
+  question: Can my company use AI to sift job applications and rank candidates?
+  expect: [anx_III, art_6.para_2]
+  article_no: Annex III / Article 6(2)
+  note: >
+    Requires connecting "sifting job applications" to employment being an
+    Annex III area. Nothing in the question says "high-risk".
+
+- id: lay-face-recognition-shop
+  group: lay
+  question: We want cameras that recognise faces in our shop. Is that allowed?
+  expect: [art_5.para_1, art_5.para_2, anx_III]
+  article_no: Article 5(1)-(2) / Annex III
+
+- id: lay-marketing-copy
+  group: lay
+  question: Our tool writes marketing emails automatically. Do we have to tell anyone?
+  expect: [art_50.para_1, art_50.para_2]
+  article_no: Article 50(1)-(2)
+
+- id: lay-consequences
+  group: lay
+  question: What happens to us if we just ignore all of this?
+  expect: [art_99.para_1, art_99.para_3, art_99.para_4]
+  article_no: Article 99
+
+- id: lay-startup-fines
+  group: lay
+  question: We are a five-person startup. Do we get the same penalties as a large company?
+  expect: [art_99.para_6, art_99.para_6a]
+  article_no: Article 99(6) and 99(6a)
+
+- id: lay-human-in-the-loop
+  group: lay
+  question: Does someone on our team need to check what the model decides before it acts?
+  expect: [art_14.para_1, art_14.para_2, art_14.para_4]
+  article_no: Article 14
+
+- id: lay-deadline
+  group: lay
+  question: How long do we have before we actually need to be compliant?
+  expect: [art_113.point_a, art_113.point_b, art_113.point_c, art_113.point_d]
+  article_no: Article 113
+
+- id: lay-buying-not-building
+  group: lay
+  question: We are buying an AI tool from a vendor rather than building it. What is on us?
+  expect: [art_26.para_1, art_3.point_4]
+  article_no: Article 26(1) / Article 3, point (4)
+  note: >
+    Turns on the deployer/provider distinction without naming either term --
+    the single most consequential classification a reader has to make.
