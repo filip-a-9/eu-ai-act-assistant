@@ -61,6 +61,7 @@ class Config:
     top_k: int
     temperature: float
     raw_dir: Path
+    chunks_dir: Path
     index_dir: Path
 
 
@@ -75,6 +76,17 @@ def raw_dir() -> Path:
     return _as_path("RAW_DIR", "data/raw")
 
 
+def chunks_dir() -> Path:
+    """Where the parsed corpus lands.
+
+    Keyless for the same reason as ``raw_dir()``: parsing local HTML into
+    chunks calls no model, so ``scripts/build_chunks.py`` must run on a fresh
+    clone without an OpenAI key.
+    """
+    load_dotenv(PROJECT_ROOT / ".env")
+    return _as_path("CHUNKS_DIR", "data/chunks")
+
+
 def load_config() -> Config:
     """Build a Config from the environment, reading .env first if present."""
     load_dotenv(PROJECT_ROOT / ".env")
@@ -85,5 +97,6 @@ def load_config() -> Config:
         top_k=_as_int("TOP_K", "5"),
         temperature=_as_float("TEMPERATURE", "0.0"),
         raw_dir=_as_path("RAW_DIR", "data/raw"),
+        chunks_dir=_as_path("CHUNKS_DIR", "data/chunks"),
         index_dir=_as_path("INDEX_DIR", "data/index"),
     )
