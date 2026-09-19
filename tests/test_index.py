@@ -1,0 +1,260 @@
+"""Structural contract for the persisted index.
+
+Every test builds a throwaway Chroma directory under ``tmp_path`` from the
+six-chunk corpus in ``conftest.py`` and a fake embedder. Nothing here measures
+retrieval quality -- that is ``evals/run_eval.py``'s job -- and nothing calls
+OpenAI.
+
+Two of these guard traps that fail silently rather than loudly: a collection
+built in the wrong distance space still returns five results, and a collection
+carrying Chroma's default embedding function still answers queries. Both give
+worse answers with no error anywhere.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from core.index import COLLECTION_NAME, build, load_chunk_records, open_collection
+
+
+class RecordingEmbedder:
+    """A fake that remembers what it was asked to embed."""
+
+    def __init__(self):
+        self.seen: list[str] = []
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        self.seen.extend(texts)
+        return [[float(len(text)), 1.0] for text in texts]
+
+
+# ---------------------------------------------------------------------------
+# What lands in the collection
+# ---------------------------------------------------------------------------
+
+
+def test_every_record_is_stored(built_index, tiny_corpus):
+    assert open_collection(built_index).count() == len(tiny_corpus)
+
+
+def test_chunk_ids_are_the_collection_keys(built_index, tiny_corpus):
+    # The eval scores against chunk ids, so this is the contract it rests on.
+    stored = open_collection(built_index).get(include=[])["ids"]
+    assert sorted(stored) == sorted(record["id"] for record in tiny_corpus)
+
+
+def test_the_stored_document_is_the_clean_law_not_the_embedded_text(
+    built_index, tiny_corpus
+):
+    # embed_text carries an editorial citation header that makes a short chunk
+    # findable. The UI has to quote the law without that header welded on, so
+    # the document stored for display must be `text`.
+    expected = {record["id"]: record["text"] for record in tiny_corpus}
+    stored = open_collection(built_index).get(include=["documents"])
+    for chunk_id, document in zip(stored["ids"], stored["documents"]):
+        assert document == expected[chunk_id]
+
+
+def test_the_embedded_text_is_the_citation_header_plus_the_law(
+    tmp_path, tiny_corpus
+):
+    embedder = RecordingEmbedder()
+    build(tiny_corpus, embedder, tmp_path / "index")
+    assert embedder.seen == [record["embed_text"] for record in tiny_corpus]
+
+
+def test_metadata_round_trips_with_every_value_a_string(built_index):
+    # Chroma drops keys whose value is None, which would turn a missing
+    # citation into a KeyError at answer time instead of a failure here.
+    stored = open_collection(built_index).get(include=["metadatas"])
+    for metadata in stored["metadatas"]:
+        assert metadata["article_no"]
+        for key, value in metadata.items():
+            assert isinstance(value, str), f"{key} is {type(value).__name__}"
+
+
+def test_metadata_carries_every_field_the_chunker_produces(built_index):
+    stored = open_collection(built_index).get(include=["metadatas"])
+    expected = {
+        "kind", "article_no", "number", "paragraph",
+        "parent_id", "title", "chapter", "source_url",
+    }
+    for metadata in stored["metadatas"]:
+        assert set(metadata) == expected
+
+
+# ---------------------------------------------------------------------------
+# The two silent traps
+# ---------------------------------------------------------------------------
+
+# Passing embedding_function=None makes Chroma 1.5.9 persist the marker
+# {"type": "legacy"}, and it warns every time that config is read back. The
+# build, open and query path never reads it and is warning-free (verified);
+# only these three tests look, so the filter is applied here rather than
+# globally, where it would hide the warning appearing somewhere new.
+_LEGACY_EF_WARNING = pytest.mark.filterwarnings(
+    "ignore:legacy embedding function config:DeprecationWarning"
+)
+
+
+@_LEGACY_EF_WARNING
+def test_the_collection_uses_cosine_distance(built_index):
+    # Chroma falls back to l2 when no space is declared. OpenAI embeddings are
+    # normalised for cosine; built in l2 the index still returns five results,
+    # just worse ones, and nothing raises.
+    configuration = open_collection(built_index).configuration
+    assert configuration["hnsw"]["space"] == "cosine"
+
+
+@_LEGACY_EF_WARNING
+def test_no_default_embedding_function_is_attached(built_index):
+    # Chroma's default is ONNX MiniLM. Left in place it will happily answer a
+    # query_texts= call by embedding the question in a different vector space
+    # from the documents -- garbage rankings, no error. It also pulls an ~80 MB
+    # model down on first use, which is a cold-start failure on a deployed host
+    # and never reproduces locally.
+    assert open_collection(built_index).configuration["embedding_function"] is None
+
+
+@_LEGACY_EF_WARNING
+def test_querying_by_text_fails_rather_than_silently_mixing_vector_spaces(
+    built_index,
+):
+    # The consequence of the test above, stated as behaviour: there is no way
+    # to accidentally get an answer out of the wrong embedding space.
+    with pytest.raises(Exception):
+        open_collection(built_index).query(query_texts=["prohibited"], n_results=1)
+
+
+# ---------------------------------------------------------------------------
+# Rebuilding
+# ---------------------------------------------------------------------------
+
+
+def test_rebuilding_replaces_rather_than_duplicating(
+    tmp_path, tiny_corpus, fake_embedder
+):
+    index_dir = tmp_path / "index"
+    build(tiny_corpus, fake_embedder, index_dir)
+    build(tiny_corpus, fake_embedder, index_dir)
+    assert open_collection(index_dir).count() == len(tiny_corpus)
+
+
+def test_rebuilding_drops_records_that_are_no_longer_in_the_corpus(
+    tmp_path, tiny_corpus, fake_embedder
+):
+    index_dir = tmp_path / "index"
+    build(tiny_corpus, fake_embedder, index_dir)
+    build(tiny_corpus[:2], fake_embedder, index_dir)
+    collection = open_collection(index_dir)
+    assert collection.count() == 2
+    assert "rct_27" not in collection.get(include=[])["ids"]
+
+
+def test_building_an_empty_corpus_yields_an_empty_collection(
+    tmp_path, fake_embedder
+):
+    build([], fake_embedder, tmp_path / "index")
+    assert open_collection(tmp_path / "index").count() == 0
+
+
+def test_rebuilding_leaves_no_orphaned_index_segments(
+    tmp_path, tiny_corpus, fake_embedder
+):
+    # Chroma's delete_collection drops the collection from sqlite but leaves
+    # its HNSW segment directory on disk. The index is committed, so an
+    # orphan per rebuild is ~600 KB of dead binary added to git history
+    # forever, and the directory grows without bound.
+    index_dir = tmp_path / "index"
+    for _ in range(3):
+        build(tiny_corpus, fake_embedder, index_dir)
+    segments = [path for path in index_dir.iterdir() if path.is_dir()]
+    assert len(segments) == 1
+
+
+def test_building_refuses_to_clobber_a_directory_that_is_not_an_index(
+    tmp_path, tiny_corpus, fake_embedder
+):
+    # A full rebuild deletes the target directory, so a mistyped INDEX_DIR
+    # must fail rather than take someone's files with it.
+    target = tmp_path / "not-an-index"
+    target.mkdir()
+    (target / "important.txt").write_text("do not delete me", encoding="utf-8")
+    with pytest.raises(RuntimeError) as excinfo:
+        build(tiny_corpus, fake_embedder, target)
+    assert "important.txt" not in str(excinfo.value)  # no contents leaked
+    assert (target / "important.txt").exists()
+
+
+# ---------------------------------------------------------------------------
+# Progress reporting
+# ---------------------------------------------------------------------------
+
+
+def test_build_reports_progress_as_it_goes(tmp_path, tiny_corpus, fake_embedder):
+    # A real build makes nine paid API calls over about a minute. Without this
+    # the script is silent throughout, and a hang is indistinguishable from
+    # normal slowness.
+    seen = []
+    build(
+        tiny_corpus,
+        fake_embedder,
+        tmp_path / "index",
+        progress=lambda done, total: seen.append((done, total)),
+    )
+    assert seen[-1] == (len(tiny_corpus), len(tiny_corpus))
+
+
+def test_build_without_a_progress_callback_still_works(
+    tmp_path, tiny_corpus, fake_embedder
+):
+    assert build(tiny_corpus, fake_embedder, tmp_path / "index") == len(tiny_corpus)
+
+
+# ---------------------------------------------------------------------------
+# Opening
+# ---------------------------------------------------------------------------
+
+
+def test_opening_a_missing_index_names_the_script_that_builds_it(tmp_path):
+    with pytest.raises(RuntimeError) as excinfo:
+        open_collection(tmp_path / "nothing-here")
+    assert "build_index.py" in str(excinfo.value)
+
+
+def test_opening_a_directory_with_no_collection_names_the_script_too(tmp_path):
+    # A half-built index -- the directory exists, the collection does not --
+    # is the shape a cancelled build leaves behind.
+    index_dir = tmp_path / "index"
+    index_dir.mkdir()
+    with pytest.raises(RuntimeError) as excinfo:
+        open_collection(index_dir)
+    assert "build_index.py" in str(excinfo.value)
+
+
+def test_the_collection_name_is_stable(built_index):
+    # Renaming it silently orphans every previously built index.
+    assert open_collection(built_index).name == COLLECTION_NAME
+
+
+# ---------------------------------------------------------------------------
+# Reading the corpus off disk
+# ---------------------------------------------------------------------------
+
+
+def test_load_chunk_records_reads_one_record_per_line(tmp_path, tiny_corpus):
+    import json
+
+    chunks_dir = tmp_path / "chunks"
+    chunks_dir.mkdir()
+    with (chunks_dir / "chunks.jsonl").open("w", encoding="utf-8") as handle:
+        for record in tiny_corpus:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    assert load_chunk_records(chunks_dir) == tiny_corpus
+
+
+def test_load_chunk_records_names_the_script_that_writes_the_file(tmp_path):
+    with pytest.raises(RuntimeError) as excinfo:
+        load_chunk_records(tmp_path / "nothing-here")
+    assert "build_chunks.py" in str(excinfo.value)

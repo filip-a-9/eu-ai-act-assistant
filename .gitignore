@@ -17,7 +17,16 @@ CLAUDE.local.md
 # git descending into it, and the negation below would never take effect.
 data/raw/*
 !data/raw/manifest.json
-data/index/
+
+# data/index/ is deliberately NOT ignored. CLAUDE.md requires the app to open a
+# prebuilt index read-only and forbids building one at startup; a host that
+# deploys straight from this repo has no build step and no persistent disk, so
+# the index can only get there by being committed. ~20 MB of Chroma sqlite and
+# HNSW binaries, replaced wholesale by scripts/build_index.py. Rebuild rarely.
+
+# Per-query logs. CLAUDE.md requires logging every question, but the log is a
+# local runtime artefact, not a corpus artefact, and may carry user questions.
+data/logs/
 
 # Virtualenvs
 .venv/

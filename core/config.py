@@ -63,6 +63,7 @@ class Config:
     raw_dir: Path
     chunks_dir: Path
     index_dir: Path
+    logs_dir: Path
 
 
 def raw_dir() -> Path:
@@ -99,4 +100,5 @@ def load_config() -> Config:
         raw_dir=_as_path("RAW_DIR", "data/raw"),
         chunks_dir=_as_path("CHUNKS_DIR", "data/chunks"),
         index_dir=_as_path("INDEX_DIR", "data/index"),
+        logs_dir=_as_path("LOGS_DIR", "data/logs"),
     )
