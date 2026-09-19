@@ -1,0 +1,24 @@
+{
+  "consolidated": {
+    "bytes": 853877,
+    "celex": "02024R1689-20260727",
+    "content_type": "text/html; charset=UTF-8",
+    "fetched_at": "2026-09-19T18:17:22+00:00",
+    "filename": "consolidated_02024R1689-20260727.html",
+    "http_status": 200,
+    "role": "articles and annexes -- law in force as of 2026-07-27",
+    "sha256": "c5edf3c9ee6af6a737bdc73a1e99f83f5090b7ecd53ce4da404f284dd31badf8",
+    "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=CELEX%3A02024R1689-20260727"
+  },
+  "oj_as_published": {
+    "bytes": 1264454,
+    "celex": "32024R1689",
+    "content_type": "text/html; charset=UTF-8",
+    "fetched_at": "2026-09-19T18:17:23+00:00",
+    "filename": "oj_32024R1689.html",
+    "http_status": 200,
+    "role": "recitals only -- dropped from consolidated versions",
+    "sha256": "20b4da240987ba8d518b9dd66ea9cc3e26ae7c596aa9ed7580fca07fd48f7c44",
+    "url": "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=OJ:L_202401689"
+  }
+}

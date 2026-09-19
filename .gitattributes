@@ -1,0 +1,4 @@
+# Normalise line endings: LF in the repository, native in the working tree.
+# Without this, committing from Windows stores CRLF and every file looks
+# modified when the repo is cloned on Linux (or onto a Streamlit host).
+* text=auto eol=lf

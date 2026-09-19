@@ -1,0 +1,35 @@
+# Secrets
+.env
+
+# Claude Code tooling -- kept out of the repo entirely
+.claude/
+.claude.json
+.mcp.json
+CLAUDE.md
+CLAUDE.local.md
+
+# Corpus and derived artefacts.
+# data/raw/ holds ~2 MB of fetched EUR-Lex HTML, reproducible via
+# scripts/fetch_source.py. manifest.json is the exception: it is the provenance
+# record (URLs + sha256) that lets anyone verify their local copy matches the
+# one an index was built from, so it is committed.
+# Note: `data/raw/*` not `data/raw/` -- excluding the directory itself stops
+# git descending into it, and the negation below would never take effect.
+data/raw/*
+!data/raw/manifest.json
+data/index/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
