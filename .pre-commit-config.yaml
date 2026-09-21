@@ -1,0 +1,40 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      # data/ is excluded from the two hooks that rewrite files. The committed
+      # corpus and index are generated artefacts, and index_manifest.json pins
+      # a sha256 of data/chunks/chunks.jsonl -- a hook that appended a newline
+      # there would silently invalidate the manifest without touching the
+      # vectors it describes.
+      - id: trailing-whitespace
+        exclude: ^data/
+      - id: end-of-file-fixer
+        exclude: ^data/
+      - id: check-yaml
+      - id: check-merge-conflict
+
+  # Deliberately no check-added-large-files. data/index/chroma.sqlite3 is a
+  # tracked 13 MB file and that is the design: a host with no build step and no
+  # persistent disk can only open a prebuilt index if the index ships with the
+  # code. The hook's default limit is 500 KB and would block exactly that.
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.8
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: local
+    hooks:
+      - id: no-index-churn
+        name: refuse index churn without a rebuild
+        entry: python3 scripts/check_index_churn.py
+        language: system
+        # The script asks git what is staged instead of reading the paths
+        # pre-commit would hand it, because pre-commit splits the file list
+        # across parallel invocations and no single one sees the whole commit.
+        # So this runs every time and takes no filenames.
+        always_run: true
+        pass_filenames: false

@@ -474,3 +474,76 @@ Recall plateaus at 0.92 by k=10 and does not improve through k=20.
 - **`tests/test_config.py`'s default assertions were updated deliberately** —
   they were red after the model and temperature change, which is the regression
   guard doing its job rather than a test to loosen.
+
+## Phase 4 — lint and commit gate (2026-09-21)
+
+### Lint configuration
+
+- **The ruff rule set is pinned in the repository** — the rules that had been
+  firing came from a user-level config outside the repo, so `ruff check`
+  reported 26 findings here and almost none on a fresh clone. Ruff's own
+  default is `E4`, `E7`, `E9` and `F`, which excludes `B017`, `UP031` and
+  `RUF100` entirely. A gate can only enforce a standard the repository states.
+- **That config lives in `ruff.toml`, not `pyproject.toml`** — uv decides a
+  directory is a uv project from a pyproject's *existence*, not its contents.
+  One added purely to hold `[tool.ruff]` made uv write a `uv.lock` declaring no
+  dependencies, because this repo keeps them in `requirements.txt`. Measured:
+  `uv sync --dry-run` against that lock listed **124** packages for removal,
+  chromadb, langgraph and streamlit among them. A `ruff.toml` configures ruff
+  identically and uv ignores it.
+- **`RUF001`–`RUF003` ignored** — non-breaking spaces and typographic quotation
+  marks are deliberate test data for a chunker whose whole job is surviving
+  EUR-Lex markup. Enabling the rules would put a suppression comment on each of
+  the 13 lines whose purpose is to hold the character.
+- **`B905` ignored rather than fixed** — `zip(strict=True)` raises where the
+  current code truncates, so it is a runtime behaviour change and not a lint
+  fix. It needs a failing test written first.
+- **Nineteen `# noqa: E402` directives removed** — each suppressed "module
+  import not at top of file" on an import following a `sys.path.insert`. Ruff
+  tolerates that idiom where flake8 does not, confirmed with `--ignore-noqa`,
+  so all nineteen were dead suppressions from a linter this repo no longer uses.
+- **Three `pytest.raises(Exception)` assertions narrowed to their real types** —
+  a bare `Exception` also passes on an `AttributeError` from a renamed field, so
+  those tests claimed to pin immutability while in fact reporting only that
+  something went wrong. Each was confirmed to fail once its guarantee was
+  removed. The Chroma one raises `ValueError`, established by running it.
+
+### The commit gate
+
+- **pre-commit installed only after the backlog was already clear** — a gate
+  that is red on arrival is a gate people learn to bypass with `--no-verify`,
+  which is the failure mode this file argues against for the eval threshold.
+- **No `check-added-large-files`** — its 500 KB default would block
+  `data/index/chroma.sqlite3`, the 13 MB file the no-build-step deploy depends
+  on.
+- **`trailing-whitespace` and `end-of-file-fixer` skip `data/`** —
+  `index_manifest.json` pins a sha256 of `chunks.jsonl`, so a hook that
+  appended a newline there would invalidate the manifest without touching the
+  vectors it describes.
+- **`ruff format` landed as its own commit** — it reformatted 15 files, and
+  formatting sitting on top of a real change makes the real change unreadable.
+  Every changed Python file was first verified to parse to an AST identical to
+  the previous commit.
+- **mypy and pytest stay out of it** — the suite is ~7 s, too slow to pay on
+  every commit, and pre-commit's isolated environments have neither langgraph
+  nor chromadb.
+
+### Index churn
+
+- **A hook refuses index files staged without `index_manifest.json`** — opening
+  and querying the committed index makes Chroma rewrite headers and segment
+  bookkeeping: measured at 372 bytes across ~13 MB after a handful of queries.
+  Committing that writes a fresh 13 MB blob, because git stores binaries whole
+  and cannot delta them, and the churn is indistinguishable from a real rebuild
+  in `git status`. The manifest is what separates the two cases, since a
+  rebuild rewrites it and a query does not.
+- **The check asks `git diff --cached` rather than reading the paths pre-commit
+  passes it** — pre-commit splits the file list across parallel invocations.
+  Measured: one run handed a single invocation two of the six index files and
+  no manifest, which as an argv-based check would reject a genuine rebuild.
+  Asking git also yields the right semantics, because git lists only paths
+  whose staged content differs from HEAD.
+- **Churn is refused at commit time rather than avoided by copying the index on
+  open** — a copy-on-open would put a 13 MB copy into every cold start and add
+  a code path to `core/index.py` whose only purpose is protecting the
+  repository. A repository problem is not worth solving in the running app.
