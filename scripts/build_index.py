@@ -21,20 +21,20 @@ import hashlib
 import json
 import sys
 from collections import Counter
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.embed import openai_embedder  # noqa: E402
-from core.index import (  # noqa: E402
+from core.config import load_config
+from core.embed import openai_embedder
+from core.index import (
     COLLECTION_NAME,
     MANIFEST_FILENAME,
     build,
     load_chunk_records,
     open_collection,
 )
-from core.config import load_config  # noqa: E402
 
 # text-embedding-3-small, USD per million tokens, as of 2026-09. Used only to
 # print an estimate before spending anything -- nothing depends on it being
@@ -88,7 +88,7 @@ def write_manifest(
         "collection": COLLECTION_NAME,
         "embed_model": model,
         "chunk_count": count,
-        "built_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "built_at": datetime.now(UTC).isoformat(timespec="seconds"),
         "chunks_file": chunks_path.name,
         "chunks_sha256": sha256_of(chunks_path),
     }

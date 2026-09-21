@@ -26,11 +26,11 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.config import load_config  # noqa: E402
-from core.embed import openai_embedder  # noqa: E402
-from core.generate import Answer, openai_generator  # noqa: E402
-from core.graph import build_graph, run_turn  # noqa: E402
-from core.index import open_collection  # noqa: E402
+from core.config import load_config
+from core.embed import openai_embedder
+from core.generate import Answer, openai_generator
+from core.graph import build_graph, run_turn
+from core.index import open_collection
 
 WIDTH = 88
 

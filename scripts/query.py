@@ -25,10 +25,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.config import load_config  # noqa: E402
-from core.embed import openai_embedder  # noqa: E402
-from core.index import open_collection  # noqa: E402
-from core.retrieve import Hit, hit_to_dict, log_query, search  # noqa: E402
+from core.config import load_config
+from core.embed import openai_embedder
+from core.index import open_collection
+from core.retrieve import Hit, hit_to_dict, log_query, search
 
 SNIPPET_CHARS = 300
 
@@ -99,7 +99,11 @@ def main() -> int:
         log_query(args.question, hits, config.logs_dir)
 
     if args.json:
-        print(json.dumps([hit_to_dict(hit) for hit in hits], ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                [hit_to_dict(hit) for hit in hits], ensure_ascii=False, indent=2
+            )
+        )
         return 0
 
     if not hits:

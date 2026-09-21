@@ -14,6 +14,7 @@ actually has one.
 
 from __future__ import annotations
 
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -144,7 +145,11 @@ def test_config_is_frozen(isolated_env):
     # mutates top_k in passing would be very hard to find.
     isolated_env.setenv("OPENAI_API_KEY", "sk-test")
     cfg = load_config()
-    with pytest.raises(Exception):
+    # FrozenInstanceError specifically, not Exception: a bare Exception here
+    # also passes on an AttributeError from a renamed field and a TypeError
+    # from a changed signature, so it would claim to pin immutability while
+    # really reporting that *something* went wrong.
+    with pytest.raises(FrozenInstanceError):
         cfg.top_k = 99  # type: ignore[misc]
 
 

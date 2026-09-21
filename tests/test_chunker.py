@@ -13,7 +13,6 @@ import re
 import pytest
 
 from core.chunker import (
-    Chunk,
     normalise,
     parse_consolidated,
     parse_oj_recitals,
@@ -115,7 +114,9 @@ def test_article_without_paragraphs_splits_at_its_points(fixture_html):
 def test_point_chunks_inherit_their_chapeau(fixture_html):
     chunks = parse_consolidated(fixture_html("article_03_definitions.html"))
     assert all(
-        c.text.startswith("For the purposes of this Regulation, the following definitions apply:")
+        c.text.startswith(
+            "For the purposes of this Regulation, the following definitions apply:"
+        )
         for c in chunks
     )
 
@@ -248,7 +249,11 @@ def test_subdivision_labels_are_well_formed(every_chunk):
     # A malformed label means a citation nobody can look up. Quoted insertions
     # in the amendment articles are the way this goes wrong in practice.
     allowed = re.compile(r"|[0-9]+[a-z]*|[a-z]{1,2}|Section \S+")
-    bad = [(c.id, c.paragraph) for c in every_chunk if not allowed.fullmatch(c.paragraph)]
+    bad = [
+        (c.id, c.paragraph)
+        for c in every_chunk
+        if not allowed.fullmatch(c.paragraph)
+    ]
     assert bad == []
 
 

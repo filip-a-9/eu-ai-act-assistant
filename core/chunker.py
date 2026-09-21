@@ -222,7 +222,11 @@ def _article_chunks(article: Tag, canonical: str) -> list[Chunk]:
     art_id = article["id"]
     heading = article.find("p", class_="title-article-norm")
     subtitle = article.find("p", class_="stitle-article-norm")
-    number = normalise(heading.get_text(" ")).replace("Article", "").strip() if heading else ""
+    number = (
+        normalise(heading.get_text(" ")).replace("Article", "").strip()
+        if heading
+        else ""
+    )
     title = normalise(subtitle.get_text(" ")) if subtitle else ""
     chapter = _chapter_of(article)
     url = f"{canonical}#{art_id}"
@@ -352,7 +356,11 @@ def _annex_chunks(annex: Tag, canonical: str) -> list[Chunk]:
     anx_id = annex["id"]
     heading = annex.find("p", class_="title-annex-1", recursive=False)
     subtitle = annex.find("p", class_="title-annex-2", recursive=False)
-    number = normalise(heading.get_text(" ")).replace("ANNEX", "").strip() if heading else ""
+    number = (
+        normalise(heading.get_text(" ")).replace("ANNEX", "").strip()
+        if heading
+        else ""
+    )
     annex_title = normalise(subtitle.get_text(" ")) if subtitle else ""
     url = f"{canonical}#{anx_id}"
 

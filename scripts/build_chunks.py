@@ -21,13 +21,13 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.chunker import (  # noqa: E402
+from core.chunker import (
     Chunk,
     parse_consolidated,
     parse_oj_recitals,
     unrecognised_labels,
 )
-from core.config import chunks_dir, raw_dir  # noqa: E402
+from core.config import chunks_dir, raw_dir
 
 # Asserted so that a future re-fetch which changes EUR-Lex's markup fails here,
 # loudly, instead of silently producing a smaller and worse corpus. Changing
@@ -86,7 +86,8 @@ def check(chunks: list[Chunk], consolidated_html: str) -> list[str]:
         unexpected = [f for f in folded if f not in KNOWN_QUOTED_INSERTIONS]
         gone = [f for f in KNOWN_QUOTED_INSERTIONS if f not in folded]
         problems.append(
-            f"subdivision markers changed -- unexpected: {unexpected}, no longer present: {gone}"
+            f"subdivision markers changed -- unexpected: {unexpected}, "
+            f"no longer present: {gone}"
         )
 
     if len(chunks) != EXPECTED_CHUNKS:
@@ -113,7 +114,9 @@ def check(chunks: list[Chunk], consolidated_html: str) -> list[str]:
 
     oversized = [c.id for c in chunks if len(c.embed_text) > EMBED_CHAR_CEILING]
     if oversized:
-        problems.append(f"{len(oversized)} chunks exceed the embedding ceiling: {oversized[:5]}")
+        problems.append(
+            f"{len(oversized)} chunks exceed the embedding ceiling: {oversized[:5]}"
+        )
 
     return problems
 

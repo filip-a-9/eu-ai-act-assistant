@@ -216,7 +216,7 @@ def _supports(cited: str, hit: Hit) -> bool:
 def check_citations(
     text: str, hits: Sequence[Hit]
 ) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Split the citations in ``text`` into those retrieval supports and those it does not."""
+    """Split the citations in ``text`` by whether retrieval supports them."""
     supported: list[str] = []
     unsupported: list[str] = []
     for cited in parse_citations(text):

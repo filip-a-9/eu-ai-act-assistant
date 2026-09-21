@@ -15,6 +15,7 @@ instead of passing on an arbitrary but stable ordering.
 from __future__ import annotations
 
 import json
+from dataclasses import FrozenInstanceError
 
 import pytest
 
@@ -170,7 +171,9 @@ def test_a_hit_carries_every_field_the_answer_surface_needs(
 
 def test_hits_are_immutable(collection, fake_embedder):
     hit = search(collection, fake_embedder, "prohibited practices", 1)[0]
-    with pytest.raises(Exception):
+    # See test_config_is_frozen: the point is that assignment is refused
+    # because the dataclass is frozen, not that it happens to fail somehow.
+    with pytest.raises(FrozenInstanceError):
         hit.score = 1.0  # type: ignore[misc]
 
 

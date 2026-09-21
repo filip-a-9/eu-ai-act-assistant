@@ -123,7 +123,15 @@ def test_querying_by_text_fails_rather_than_silently_mixing_vector_spaces(
 ):
     # The consequence of the test above, stated as behaviour: there is no way
     # to accidentally get an answer out of the wrong embedding space.
-    with pytest.raises(Exception):
+    #
+    # Chroma 1.5.9 raises ValueError here, checked by running it rather than
+    # guessing: "You must provide an embedding function to compute embeddings".
+    # The type alone is too broad to carry the claim -- a bad n_results would
+    # also be a ValueError -- so the message fragment is what distinguishes
+    # "refused to embed the question" from "rejected the call for some other
+    # reason". Only the stable clause is matched, not the whole string, which
+    # also carries a documentation URL that is free to change.
+    with pytest.raises(ValueError, match="embedding function"):
         open_collection(built_index).query(query_texts=["prohibited"], n_results=1)
 
 

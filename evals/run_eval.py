@@ -29,10 +29,10 @@ import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.config import load_config  # noqa: E402
-from core.embed import openai_embedder  # noqa: E402
-from core.index import open_collection  # noqa: E402
-from core.retrieve import Hit, search  # noqa: E402
+from core.config import load_config
+from core.embed import openai_embedder
+from core.index import open_collection
+from core.retrieve import Hit, search
 
 QUESTIONS_PATH = Path(__file__).parent / "questions.yaml"
 SWEEP = (1, 3, 5, 10, 20)
@@ -79,7 +79,9 @@ def load_questions() -> list[Question]:
     ]
     duplicates = {q.id for q in questions if [x.id for x in questions].count(q.id) > 1}
     if duplicates:
-        raise SystemExit(f"duplicate question ids in questions.yaml: {sorted(duplicates)}")
+        raise SystemExit(
+            f"duplicate question ids in questions.yaml: {sorted(duplicates)}"
+        )
     return questions
 
 
@@ -143,7 +145,7 @@ def report(results: list[Result], top_k: int) -> None:
     # entirely a question about the lay group.
     groups = sorted({result.question.group for result in results})
     if len(groups) > 1:
-        print("\ngroup        n   recall@%d  MRR@%d" % (top_k, top_k))
+        print(f"\ngroup        n   recall@{top_k}  MRR@{top_k}")
         for group in groups:
             subset = [r for r in results if r.question.group == group]
             print(

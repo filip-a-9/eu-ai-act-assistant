@@ -23,14 +23,14 @@ import argparse
 import hashlib
 import json
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from core.config import raw_dir  # noqa: E402
+from core.config import raw_dir
 
 # EUR-Lex rejects requests with the default python-requests user agent.
 USER_AGENT = "eu-ai-act-rag/0.1 (portfolio project; contact via repository)"
@@ -99,7 +99,7 @@ def fetch(source: dict, target: Path) -> dict:
         "content_type": response.headers.get("Content-Type", ""),
         "bytes": len(response.content),
         "sha256": sha256_of(target),
-        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "fetched_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
 
 

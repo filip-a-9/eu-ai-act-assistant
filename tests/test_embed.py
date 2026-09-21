@@ -17,7 +17,6 @@ import pytest
 
 from core.embed import BATCH_SIZE, Embedder, OpenAIEmbedder
 
-
 # ---------------------------------------------------------------------------
 # A fake standing in for openai.OpenAI, mimicking only the response shape used
 # ---------------------------------------------------------------------------
