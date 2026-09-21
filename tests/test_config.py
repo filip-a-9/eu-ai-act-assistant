@@ -30,6 +30,7 @@ CONFIG_VARS = (
     "CHAT_MODEL",
     "TOP_K",
     "TEMPERATURE",
+    "MAX_QUESTIONS",
     "RAW_DIR",
     "CHUNKS_DIR",
     "INDEX_DIR",
@@ -93,6 +94,17 @@ def test_non_numeric_temperature_fails_instead_of_silently_defaulting(isolated_e
     assert "TEMPERATURE" in str(excinfo.value)
 
 
+def test_non_numeric_max_questions_fails_instead_of_silently_defaulting(isolated_env):
+    # This one bounds spending, so a typo that fell back to the default would
+    # be a silently larger bill than the deployment intended.
+    isolated_env.setenv("OPENAI_API_KEY", "sk-test")
+    isolated_env.setenv("MAX_QUESTIONS", "lots")
+    with pytest.raises(RuntimeError) as excinfo:
+        load_config()
+    message = str(excinfo.value)
+    assert "MAX_QUESTIONS" in message and "lots" in message
+
+
 # ---------------------------------------------------------------------------
 # Secret hygiene -- every query gets logged, so repr() is a leak surface
 # ---------------------------------------------------------------------------
@@ -123,6 +135,8 @@ def test_defaults_match_the_documented_stack(isolated_env):
     assert cfg.top_k == 5
     # Not 0.0: gpt-5.6 rejects every temperature but its default with a 400.
     assert cfg.temperature == 1.0
+    # The per-session question cap the Streamlit app enforces before it spends.
+    assert cfg.max_questions == 10
 
 
 def test_relative_paths_anchor_to_the_repo_root_not_the_working_directory(
@@ -170,6 +184,7 @@ def test_config_carries_no_fields_beyond_the_documented_set():
         "chat_model",
         "top_k",
         "temperature",
+        "max_questions",
         "raw_dir",
         "chunks_dir",
         "index_dir",

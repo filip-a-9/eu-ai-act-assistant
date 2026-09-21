@@ -60,6 +60,7 @@ class Config:
     chat_model: str
     top_k: int
     temperature: float
+    max_questions: int
     raw_dir: Path
     chunks_dir: Path
     index_dir: Path
@@ -100,6 +101,11 @@ def load_config() -> Config:
         # returns a 400 for anything else. Answers are held to the law by the
         # citation check in core/generate.py, not by a sampling parameter.
         temperature=_as_float("TEMPERATURE", "1.0"),
+        # The Streamlit app's per-session spend bound. A number here rather
+        # than a literal in app.py, for the same reason as top_k: the value a
+        # deployment needs to change is the one thing it must not have to edit
+        # code to change.
+        max_questions=_as_int("MAX_QUESTIONS", "10"),
         raw_dir=_as_path("RAW_DIR", "data/raw"),
         chunks_dir=_as_path("CHUNKS_DIR", "data/chunks"),
         index_dir=_as_path("INDEX_DIR", "data/index"),

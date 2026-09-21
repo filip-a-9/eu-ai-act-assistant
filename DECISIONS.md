@@ -547,3 +547,102 @@ Recall plateaus at 0.92 by k=10 and does not improve through k=20.
   open** — a copy-on-open would put a 13 MB copy into every cold start and add
   a code path to `core/index.py` whose only purpose is protecting the
   repository. A repository problem is not worth solving in the running app.
+
+## Phase 5 — the Streamlit shell (2026-09-21)
+
+### Scope
+
+- **The app renders and bounds spending; it decides nothing else** — `app.py`
+  holds no prompt text, no ranking and no retrieval, so the CLI, the eval and
+  the UI cannot answer the same question differently. Query logging needed no
+  code here at all: it already happens inside the retrieve node, which nothing
+  can reach without passing through.
+- **No `sys.path` insert, unlike every entry point in `scripts/`** — Streamlit
+  runs `app.py` from the repository root, so `core` is importable. The
+  `# noqa: E402` idiom those files needed was removed repo-wide in Phase 4 and
+  is not reintroduced here.
+
+### Citations in the UI
+
+- **Bracketed citations become links; the retrieved text is not shown** — the
+  answer reads as the model wrote it, with each provision clickable through to
+  EUR-Lex, and a sources list under it naming only what the answer leaned on.
+  Expanding the quoted chunk in the page was considered and dropped: it doubles
+  the reading surface for a demo whose claim is that the citation is checkable,
+  and the link already makes it checkable against the Official Journal rather
+  than against our own copy of it.
+- **The matching lives in `core/generate.py`, not in the app** —
+  `supporting_hit()` exposes the `_supports()` rule that already decides
+  refusal. Two implementations of "which chunk backs this label" could
+  disagree, and the disagreement would be a link pointing somewhere the
+  citation check did not approve.
+- **`link_citations()` rewrites whole brackets in one regex pass** — the
+  alternative, one `str.replace` per parsed label, was written and run against
+  the tests. It fails two ways: it cannot render `[Article 5(1); Recital 27]`,
+  because no bracket in the text is spelled `[Recital 27]`, and it has nowhere
+  to escape a label nothing backs. It is *not* vulnerable to the prefix
+  collision it appears to be — the closing bracket anchors the search, so
+  `[Article 99]` never occurs inside `[Article 99(3)]`. The docstring says so
+  explicitly, because the plausible-sounding wrong reason is what a later
+  reader would otherwise supply.
+- **A label nothing backs is left as plain text** — it should never reach the
+  page, since an unsupported citation is refused upstream, but inventing a
+  destination for one here would quietly undo that check.
+
+### Spending
+
+- **A per-session question cap, enforced in `app.py` before the call** —
+  `MAX_QUESTIONS`, default 10, in `core/config.py` beside `top_k` for the same
+  reason: the value a deployment needs to change is the one thing it must not
+  have to edit code to change. At roughly $0.01 a turn, a public URL without
+  this is an open tap on the project's OpenAI account.
+- **The thread and the spend are counted separately** — "New conversation"
+  clears `turns` so the rewrite node starts fresh, and deliberately leaves
+  `asked` alone. A cap a button resets is not a cap.
+- **A failed turn is neither recorded nor counted** — it produced no answer
+  and, for a rate limit or a timeout, no billable call.
+
+### Streamlit mechanics
+
+- **Config, index, clients and graph are built once behind
+  `@st.cache_resource`** — Streamlit re-executes the module on every
+  interaction, and an uncached factory would reopen the Chroma collection and
+  construct two API clients per keystroke.
+- **Startup failures render as their own message, not as a traceback** — a
+  missing key and a missing index both raise a `RuntimeError` that already
+  names the fix, so the app shows the message and stops.
+- **A finished turn appends to `session_state` and reruns** — rather than being
+  painted inline, so the counter, the cap and the starters all reflect it. The
+  answer is already in memory, so the repaint asks nothing again.
+
+### Answer length
+
+- **The brevity instruction was made specific after the UI showed what "a few
+  sentences" bought** — asked which practices are prohibited, the model
+  returned a ten-bullet enumeration of ~3,100 characters, every bullet
+  correctly cited. Prose is now capped at four sentences with bullet lists and
+  headings forbidden, and the prompt says what to do with an enumerating
+  provision: name the categories and cite the provision that lists them.
+  Re-measured on the same question: **746 characters, one sentence, no
+  bullets**.
+- **The cost is citation granularity, accepted** — the long answer cited each
+  point from `Article 5(1)(a)` to `(h)`; the short one cites `Article 5(1)`,
+  the paragraph that contains them all. Still exact, one level coarser. The
+  trade is one clause in `SYSTEM_PROMPT` and can be reversed there.
+
+### Testing
+
+- **No committed tests for `app.py`** — `tests/` mirrors `core/`, and
+  everything worth pinning was pushed down into `core/config.py` and
+  `core/generate.py`, where it is testable without a UI harness. 134 tests to
+  143.
+- **The UI was verified with Streamlit's own `AppTest`, run as throwaway
+  tooling rather than committed** — nineteen checks over the paths that need no
+  network: both startup failures, the layout, the disabled input at the cap,
+  a rendered answer's links and sources, a refusal carrying no sources block,
+  and "New conversation" clearing the thread while the spend count survives.
+- **Two live turns were then run through the same harness** — the one path no
+  offline check can reach. Measured: the first turn logged `rewritten: null`,
+  and the follow-up "what about small companies?" was rewritten to "Which AI
+  practices are prohibited for small companies?" before retrieval, which is the
+  rewrite node doing the job the conditional edge exists for.
