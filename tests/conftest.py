@@ -168,3 +168,81 @@ def built_index(tmp_path, tiny_corpus, fake_embedder):
     index_dir = tmp_path / "index"
     build(tiny_corpus, fake_embedder, index_dir)
     return index_dir
+
+
+# ---------------------------------------------------------------------------
+# Generation fixtures
+# ---------------------------------------------------------------------------
+
+
+class FakeGenerator:
+    """Returns canned completions and records what it was asked.
+
+    An LLM's wording is not reproducible, but everything this project promises
+    about an answer is: which chunks went into the prompt, which citations came
+    out, whether it refused. Feeding a canned completion makes all of that
+    deterministic without pretending the model itself is.
+
+    ``calls`` is recorded so a test can assert the system prompt was untouched
+    by retrieved text. It is evidence about the real code's behaviour, not a
+    stand-in for it.
+    """
+
+    def __init__(self, *replies: str):
+        self.replies = list(replies)
+        self.calls: list[tuple[str, str]] = []
+
+    def complete(self, system: str, user: str) -> str:
+        self.calls.append((system, user))
+        if not self.replies:
+            raise AssertionError("FakeGenerator ran out of canned replies")
+        return self.replies.pop(0)
+
+
+class ExplodingGenerator:
+    """Fails loudly if anything calls the model.
+
+    Used where the contract is that no call happens at all -- an empty
+    retrieval must refuse without spending anything. Asserting on a call
+    counter would state that a fake was used; raising here makes the real
+    short-circuit failing show up as a test failure.
+    """
+
+    def complete(self, system: str, user: str) -> str:
+        raise AssertionError("the model was called when it should not have been")
+
+
+@pytest.fixture
+def fake_generator():
+    return FakeGenerator
+
+
+@pytest.fixture
+def exploding_generator():
+    return ExplodingGenerator()
+
+
+@pytest.fixture
+def tiny_hits(tiny_corpus):
+    """The tiny corpus as retrieval output, ranked in list order.
+
+    Built directly rather than by querying an index: generation's contract is
+    with a list of Hits, and going through Chroma would make these tests fail
+    for retrieval's reasons.
+    """
+    from core.retrieve import Hit
+
+    return [
+        Hit(
+            rank=rank,
+            id=record["id"],
+            score=1.0 - rank / 100,
+            article_no=record["article_no"],
+            title=record["title"],
+            chapter=record["chapter"],
+            kind=record["kind"],
+            source_url=record["source_url"],
+            text=record["text"],
+        )
+        for rank, record in enumerate(tiny_corpus, start=1)
+    ]

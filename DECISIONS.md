@@ -353,3 +353,124 @@ Recall plateaus at 0.92 by k=10 and does not improve through k=20.
 - **The suite was verified with all outbound sockets blocked and
   `OPENAI_API_KEY` unset** — 98 tests pass, which makes the no-network rule a
   measured fact rather than an intention.
+## Phase 3 — generation (2026-09-21)
+
+### Scope
+
+- **Generation core only; the Streamlit app is its own step** — `core/generate.py`,
+  `core/graph.py`, `scripts/ask.py` and their tests. Keeping the UI out holds
+  this diff to something readable rather than skimmable, and the graph is
+  exercised by a REPL in the meantime.
+- **`core/graph.py` exists although the documented layout does not name it** —
+  same precedent as `core/embed.py`. Prompts and model calls live in
+  `generate.py`, wiring in `graph.py`, so every word the model sees is in one
+  file and every edge is in the other. A single module mixing both would be
+  ~350 lines with two unrelated reasons to change.
+- **`evals/run_eval.py` was not re-run** — nothing in this phase calls into
+  `core/retrieve.py`'s ranking and the file is untouched, so the recorded
+  recall@5 of 0.83 still describes the index. The grounding check the commands
+  block advertises is still unwritten and belongs with its own step.
+
+### Refusal and citations
+
+- **Refusal is model-judged and then verified, with no score threshold** — the
+  prompt tells the model to refuse when the provisions do not answer, and every
+  citation it emits is checked against what was actually retrieved. A minimum
+  score would be a number chosen before any evidence says where it belongs,
+  which is the objection that already deferred the BM25 fusion weight.
+- **The refusal replaces the draft inside `answer()`, not in the caller** — a
+  caller that forgot to check `refused` would otherwise print ungrounded prose
+  about the law, and `generate.py` is the only module positioned to stop that.
+- **`Answer.refused` is derived from `citations`, not stored** — so the flag
+  cannot disagree with the evidence. An answer with nothing supporting it *is*
+  a refusal; there is no third state.
+- **Uncited prose is refused too** — which includes the model refusing in its
+  own words. All three failure shapes end in one auditable refusal string.
+- **Prose with inline bracketed citations, not structured output** — a JSON
+  `citations` array detaches the citation from the sentence it supports, and
+  CLAUDE.md's rule is that every *claim* cites. Brackets also give the app a
+  place to hang a link to `source_url` later.
+- **Citation matching is boundary-aware in both directions** — a cited label
+  matches a retrieved one outright, or extends it at a `(` or `,` boundary, or
+  is extended by it. Both directions are real: "Article 99" cited from the
+  retrieved "Article 99(3)", and "Article 5(1)(a)" cited from "Article 5(1)".
+  The boundary is what stops "Article 6" being satisfied by "Article 60(1)".
+- **The narrowing direction additionally checks the chunk's text** — "Article
+  5(1)(z)" is rejected because `(z)` appears nowhere in the Article 5(1) chunk,
+  while `(a)` does. Without it, one genuine paragraph would vouch for any
+  subdivision a model cared to invent under it.
+- **Found by running it, not by reasoning about it** — the first real query was
+  "Which AI practices are banned outright?", the single easiest question in the
+  eval set, and it refused. The model had correctly cited Article 5(1)(a)-(h)
+  from the Article 5(1) chunk, and the one-directional check called all ten
+  fabrications. Phase 1 had already decided that citation precision does not
+  require chunk precision; the check had simply not implemented it.
+- **A refusal ships no sources** — `refuse_node` drops the hits. A refusal
+  printed above five retrieved provisions reads, to anyone skimming, exactly
+  like a cited answer.
+- **`Answer.cited_hits` drives the sources list, not `hits`** — listing all
+  `top_k` would credit an answer with provisions it never used.
+
+### The graph
+
+- **No checkpointer, by decision** — conversation history belongs to the
+  caller, which keeps a turn a pure function of `(question, history)` and keeps
+  it reproducible from the query log. Adding one would bring persistence,
+  `thread_id` plumbing on every invoke, and state through serde, for a feature
+  nothing has asked for.
+- **Dependencies arrive as `build_graph()` arguments, never module globals** —
+  what lets the tests build the same graph over a six-chunk index with a fake
+  embedder and a canned generator, and never reach the network.
+- **`log_query` moved into `retrieve_node`** — the CLI, the app and any future
+  caller all log because none of them can retrieve without passing through the
+  node. Logging in the CLI would have been one `--no-log` flag away from a
+  silent gap.
+- **`rewritten` is now populated** — the field `log_query` has written as
+  `null` since Phase 2, exactly as its docstring anticipated. Question and
+  rewrite are both recorded, which is the only way to tell a bad rewrite from
+  a bad retrieval afterwards.
+
+### Model
+
+- **`chat_model` default moved from `gpt-4o-mini` to `gpt-5.6-terra`** — chosen
+  from `client.models.list()` against the real account rather than typed from
+  memory, the same reasoning as the dependency pins. Terra is the balanced tier
+  at $2/$12 per million tokens, roughly $0.01 an answer at `top_k=5`. Luna is
+  ten times cheaper and Sol 2.5 times dearer; both are one env var away.
+- **`TEMPERATURE` default moved from 0.0 to 1.0** — measured: gpt-5.6 returns
+  `400 unsupported_value` for every temperature but its default. Answers are
+  held to the law by the citation check, not by a sampling parameter, and a
+  `TEMPERATURE=0` left in an env file now fails loudly and by name.
+
+### CLI
+
+- **`scripts/ask.py` is a REPL, separate from `scripts/query.py`** — the
+  documented layout pins `query.py` as retrieval with no generation, and
+  keeping a generation-free view of retrieval is what makes a bad answer
+  diagnosable. A loop rather than a one-shot because the rewrite node only does
+  anything on a follow-up; a history passed by flags would have left that path
+  unexercised until the UI existed.
+- **Wrapping is per line, not over the whole answer** — `textwrap.wrap` on the
+  full text collapses every newline, which turned a list of ten prohibitions
+  into one unreadable paragraph.
+- **Metadata prints in an explicit mid-gray, never ANSI dim** — dim renders as
+  black on a black terminal.
+
+### Testing
+
+- **98 tests to 134, written before each module existed** — and verified with
+  outbound connections blocked and `OPENAI_API_KEY` unset, so the no-network
+  rule stays a measured fact.
+- **`ExplodingGenerator` raises instead of counting calls** — where the
+  contract is that no model call happens at all, a call counter would assert
+  that a fake was used. Raising makes the real short-circuit failing show up as
+  a test failure.
+- **`FakeGenerator` returns canned completions** — an LLM's wording is not
+  reproducible, but everything this project promises about an answer is: what
+  went into the prompt, what came out, whether it refused.
+- **The prompt-injection test asserts the system prompt is byte-identical** —
+  cheap, because `SYSTEM_PROMPT` is a constant and corpus text only ever
+  reaches `format_context`. The architecture is what makes the test trivial.
+- **`tests/test_config.py`'s default assertions were updated deliberately** —
+  they were red after the model and temperature change, which is the regression
+  guard doing its job rather than a test to loosen.

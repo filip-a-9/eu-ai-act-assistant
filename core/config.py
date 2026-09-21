@@ -94,9 +94,12 @@ def load_config() -> Config:
     return Config(
         openai_api_key=_require("OPENAI_API_KEY"),
         embed_model=os.environ.get("EMBED_MODEL", "text-embedding-3-small"),
-        chat_model=os.environ.get("CHAT_MODEL", "gpt-4o-mini"),
+        chat_model=os.environ.get("CHAT_MODEL", "gpt-5.6-terra"),
         top_k=_as_int("TOP_K", "5"),
-        temperature=_as_float("TEMPERATURE", "0.0"),
+        # 1.0, not 0.0: gpt-5.6 accepts only its default temperature and
+        # returns a 400 for anything else. Answers are held to the law by the
+        # citation check in core/generate.py, not by a sampling parameter.
+        temperature=_as_float("TEMPERATURE", "1.0"),
         raw_dir=_as_path("RAW_DIR", "data/raw"),
         chunks_dir=_as_path("CHUNKS_DIR", "data/chunks"),
         index_dir=_as_path("INDEX_DIR", "data/index"),

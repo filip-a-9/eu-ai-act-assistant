@@ -118,9 +118,10 @@ def test_defaults_match_the_documented_stack(isolated_env):
     isolated_env.setenv("OPENAI_API_KEY", "sk-test")
     cfg = load_config()
     assert cfg.embed_model == "text-embedding-3-small"
-    assert cfg.chat_model == "gpt-4o-mini"
+    assert cfg.chat_model == "gpt-5.6-terra"
     assert cfg.top_k == 5
-    assert cfg.temperature == 0.0
+    # Not 0.0: gpt-5.6 rejects every temperature but its default with a 400.
+    assert cfg.temperature == 1.0
 
 
 def test_relative_paths_anchor_to_the_repo_root_not_the_working_directory(
