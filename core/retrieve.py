@@ -82,8 +82,13 @@ def search(
             source_url=metadata["source_url"],
             text=document,
         )
+        # strict: these four lists are one response destructured into columns,
+        # not four independent sequences. Chroma builds them the same length,
+        # so a mismatch means the response is malformed -- and zip's default
+        # would answer that by returning fewer hits than were retrieved, which
+        # in a citation-grounded assistant is a citation dropped in silence.
         for rank, (chunk_id, document, metadata, distance) in enumerate(
-            zip(ids, documents, metadatas, distances), start=1
+            zip(ids, documents, metadatas, distances, strict=True), start=1
         )
     ]
 

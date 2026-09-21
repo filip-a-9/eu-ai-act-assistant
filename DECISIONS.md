@@ -495,9 +495,18 @@ Recall plateaus at 0.92 by k=10 and does not improve through k=20.
   marks are deliberate test data for a chunker whose whole job is surviving
   EUR-Lex markup. Enabling the rules would put a suppression comment on each of
   the 13 lines whose purpose is to hold the character.
-- **`B905` ignored rather than fixed** — `zip(strict=True)` raises where the
-  current code truncates, so it is a runtime behaviour change and not a lint
-  fix. It needs a failing test written first.
+- **`B905` enforced, and all three `zip()` calls made strict** — `zip` stops at
+  the shortest input, so a Chroma response missing one `metadatas` entry would
+  have built *fewer hits than were retrieved* with nothing raised anywhere.
+  Measured against a stubbed short response: five chunks retrieved, four `Hit`s
+  returned, the fifth citation gone in silence. The two calls in `tests/` were
+  worse for a smaller blast radius — their assertions live inside the loop, so
+  an empty `documents` list ran the body zero times; both were run against a
+  truncated response and reported green having checked nothing. Ruff's
+  `--fix --unsafe-fixes` writes `strict=False`, which preserves precisely the
+  behaviour worth removing, so all three were written by hand. The production
+  site was pinned by a test that failed first, and recall@5 is unchanged at
+  0.83.
 - **Nineteen `# noqa: E402` directives removed** — each suppressed "module
   import not at top of file" on an import following a `sys.path.insert`. Ruff
   tolerates that idiom where flake8 does not, confirmed with `--ignore-noqa`,

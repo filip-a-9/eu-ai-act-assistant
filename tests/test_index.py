@@ -50,9 +50,12 @@ def test_the_stored_document_is_the_clean_law_not_the_embedded_text(
     # embed_text carries an editorial citation header that makes a short chunk
     # findable. The UI has to quote the law without that header welded on, so
     # the document stored for display must be `text`.
+    #
+    # strict: the assertion is inside the loop, so a short `documents` list
+    # would run the body zero times and report green having checked nothing.
     expected = {record["id"]: record["text"] for record in tiny_corpus}
     stored = open_collection(built_index).get(include=["documents"])
-    for chunk_id, document in zip(stored["ids"], stored["documents"]):
+    for chunk_id, document in zip(stored["ids"], stored["documents"], strict=True):
         assert document == expected[chunk_id]
 
 

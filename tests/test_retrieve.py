@@ -81,7 +81,9 @@ def test_the_score_is_one_minus_the_cosine_distance(collection, fake_embedder):
         n_results=3,
         include=["distances"],
     )
-    for hit, distance in zip(hits, raw["distances"][0]):
+    # strict: same reason as in test_index -- a short list here would quietly
+    # check fewer conversions than there are hits, or none at all.
+    for hit, distance in zip(hits, raw["distances"][0], strict=True):
         assert hit.score == pytest.approx(1.0 - distance)
 
 
@@ -174,6 +176,54 @@ def test_hits_are_immutable(collection, fake_embedder):
     # because the dataclass is frozen, not that it happens to fail somehow.
     with pytest.raises(FrozenInstanceError):
         hit.score = 1.0  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# A response whose parallel lists disagree
+# ---------------------------------------------------------------------------
+
+
+class TruncatedResponseCollection:
+    """A Chroma stand-in returning one fewer metadata than it returns ids.
+
+    Chroma builds the four lists together, so a real response cannot look like
+    this today. The stub exists to pin what happens if that ever stops holding
+    -- not to stand in for the collection in any other test.
+    """
+
+    def __init__(self, hits: int):
+        self.hits = hits
+
+    def query(self, **_kwargs):
+        metadata = {
+            "article_no": "Article 5(1)",
+            "title": "Prohibited AI practices",
+            "chapter": "Chapter II",
+            "kind": "article",
+            "source_url": "https://example.invalid/art5",
+        }
+        return {
+            "ids": [[f"art_5.para_{n}" for n in range(self.hits)]],
+            "documents": [["the law" for _ in range(self.hits)]],
+            "metadatas": [[metadata for _ in range(self.hits - 1)]],
+            "distances": [[0.1 for _ in range(self.hits)]],
+        }
+
+
+def test_a_response_missing_a_metadata_entry_raises_instead_of_dropping_a_hit(
+    fake_embedder,
+):
+    # zip stops at the shortest input, so without strict= this returns four
+    # Hits for five retrieved chunks and nothing anywhere reports it. In a
+    # citation-grounded assistant a dropped hit is a dropped citation, and the
+    # answer built from the survivors still looks complete.
+    #
+    # Only the stable clause of CPython's message is matched. The full text
+    # names the argument position, which would change if the zip arguments
+    # were ever reordered; "shorter" is what distinguishes "refused to
+    # truncate" from some other ValueError out of the query path.
+    with pytest.raises(ValueError, match="shorter"):
+        search(TruncatedResponseCollection(hits=5), fake_embedder, "prohibited", 5)
 
 
 # ---------------------------------------------------------------------------

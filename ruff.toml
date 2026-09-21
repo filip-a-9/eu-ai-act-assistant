@@ -40,8 +40,4 @@ ignore = [
     "RUF001",
     "RUF002",
     "RUF003",
-    # zip(strict=True) raises where the current code truncates, so this is a
-    # runtime behaviour change rather than a lint fix and needs a failing test
-    # first. Scheduled separately: .claude/specs/zip-without-strict.md
-    "B905",
 ]
