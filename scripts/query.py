@@ -91,7 +91,7 @@ def main() -> int:
     config = load_config()
     top_k = args.top_k if args.top_k is not None else config.top_k
 
-    collection = open_collection(config.index_dir)
+    collection = open_collection(config.index_dir, config.scratch_dir)
     embedder = openai_embedder(config.openai_api_key, config.embed_model)
     hits = search(collection, embedder, args.question, top_k)
 

@@ -52,7 +52,7 @@ def _assistant():
     """
     config = load_config()
     graph = build_graph(
-        collection=open_collection(config.index_dir),
+        collection=open_collection(config.index_dir, config.scratch_dir),
         embedder=openai_embedder(config.openai_api_key, config.embed_model),
         generator=openai_generator(
             config.openai_api_key, config.chat_model, config.temperature

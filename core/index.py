@@ -22,8 +22,11 @@ rather than raising, so both are pinned by tests:
 
 from __future__ import annotations
 
+import atexit
 import json
 import shutil
+import stat
+import tempfile
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -181,22 +184,77 @@ def build(
         client.close()
 
 
-def open_collection(index_dir: Path):
-    """Open the prebuilt collection for reading.
+def _writable_copy(index_dir: Path, scratch_dir: Path | None) -> Path:
+    """Copy the index somewhere writable and return where the copy landed.
+
+    Chroma's persistent client is a read-write database, not a file reader:
+    connecting opens a write transaction, and the first read flushes an HNSW
+    buffer. Pointed straight at the committed ``data/index/`` that dirties
+    files the repository tracks, and none of it converges -- part of
+    ``length.bin`` is a buffer serialised with heap pointers still in it, which
+    ASLR re-randomises every run, so there is no stable version that could be
+    committed once to make it stop.
+
+    It also makes the index unopenable on a read-only filesystem, which is a
+    common container default and exactly the arrangement CLAUDE.md's "the app
+    opens a prebuilt index read-only" describes.
+
+    Copying outright is cheap enough that nothing cleverer is warranted:
+    measured at 17 ms for the 13.6 MB corpus index. A scratch directory keyed
+    on the manifest and reused between runs would save that and buy a cache
+    invalidation rule plus a race between two processes populating it.
+    """
+    if scratch_dir is not None:
+        scratch_dir = Path(scratch_dir)
+        scratch_dir.mkdir(parents=True, exist_ok=True)
+    workdir = Path(tempfile.mkdtemp(prefix="ai-act-index-", dir=scratch_dir))
+    try:
+        shutil.copytree(index_dir, workdir, dirs_exist_ok=True)
+        # copytree preserves mode bits, so a read-only source would otherwise
+        # produce a read-only copy -- the exact thing this function exists to
+        # avoid. The copy belongs to this process, so it is ours to unlock.
+        for path in (workdir, *workdir.rglob("*")):
+            path.chmod(path.stat().st_mode | stat.S_IWUSR | stat.S_IRUSR)
+    except OSError as exc:
+        # The directory exists before the copy can be known to have worked, so
+        # the failure path owns it. Leaving it to the atexit below would let a
+        # long-lived process that retries a failing open strand one abandoned
+        # copy per attempt.
+        shutil.rmtree(workdir, ignore_errors=True)
+        raise RuntimeError(
+            f"cannot open the index at {index_dir}: {exc}. The index is copied "
+            f"to a writable scratch directory before it is opened, so this is a "
+            f"permissions or free-space problem at one end or the other -- not "
+            f"a missing or half-built index."
+        ) from exc
+    # The copy is this process's alone, so it dies with the process. 13.6 MB
+    # left behind per run is not free on the kind of small host this deploys to.
+    atexit.register(shutil.rmtree, workdir, ignore_errors=True)
+    return workdir
+
+
+def open_collection(index_dir: Path, scratch_dir: Path | None = None):
+    """Open the prebuilt collection for reading, without writing to it.
 
     Never builds. CLAUDE.md requires the app to open a prebuilt index, so the
     only thing this can do about a missing one is say which script makes it.
+
+    ``scratch_dir`` is where the writable copy goes; ``None`` means the
+    system temp directory, which is what a deployed host normally wants.
     """
     index_dir = Path(index_dir)
     if not index_dir.exists():
         raise RuntimeError(
             f"no index at {index_dir}. Run: python scripts/build_index.py"
         )
+    workdir = _writable_copy(index_dir, scratch_dir)
     try:
-        return _client(index_dir).get_collection(
-            COLLECTION_NAME, embedding_function=None
-        )
-    except Exception as exc:
+        return _client(workdir).get_collection(COLLECTION_NAME, embedding_function=None)
+    except chromadb.errors.NotFoundError as exc:
+        # Narrow on purpose. This message sends someone to rebuild, so it must
+        # only appear when the collection really is absent -- the bare
+        # `except Exception` it replaces reported a read-only filesystem as a
+        # cancelled build, which is a wrong turn that costs an afternoon.
         raise RuntimeError(
             f"no '{COLLECTION_NAME}' collection in {index_dir} -- the directory "
             f"exists but holds no index, which is what a cancelled build leaves "

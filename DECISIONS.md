@@ -655,3 +655,67 @@ Recall plateaus at 0.92 by k=10 and does not improve through k=20.
   and the follow-up "what about small companies?" was rewritten to "Which AI
   practices are prohibited for small companies?" before retrieval, which is the
   rewrite node doing the job the conditional edge exists for.
+
+## Phase 6 — opening the index without writing to it (2026-09-21)
+
+### The problem
+
+- **Chroma's persistent client writes to the directory it opens** — merely
+  constructing the client and calling `get_collection` dirties
+  `chroma.sqlite3`; the first read dirties `length.bin` too. No query and no
+  network are needed. Measured against `HEAD`: bytes 24-27 (SQLite's file
+  change counter) and 92-95 (the version-valid-for number that shadows it) each
+  incremented by one, plus one b-tree page.
+- **The churn never converges, so there is no version that could be committed
+  once** — `length.bin` is 400 bytes of which 20 are nonzero, and those 20 are
+  heap addresses (`0x7ea2a0000468`). ASLR re-randomises them every process
+  start. Three consecutive opens, each diffed against the previous: sqlite 10
+  then 10 bytes, `length.bin` 143 then 106.
+- **It also made the index unopenable on a read-only filesystem** — measured
+  as failing both with files read-only and with files and directories
+  read-only. A container with a read-only rootfs is a common default, and
+  CLAUDE.md's "the app opens a prebuilt index read-only" was true of no code
+  path.
+
+### The fix
+
+- **`open_collection` copies the index to a writable scratch directory and
+  opens the copy** — so `data/index/` is now written by nothing but
+  `scripts/build_index.py`. Measured: `copytree` of the whole index is **17 ms**
+  (20, 16, 17 over three runs) for 13.6 MB.
+- **Rejected: a scratch directory keyed on the manifest and reused between
+  runs** — it would save those 17 ms and buy a cache-invalidation rule plus a
+  race between two processes populating it.
+- **`copytree` preserves mode bits, so the copy is explicitly made writable** —
+  otherwise a read-only source yields a read-only copy, which is the thing the
+  copy exists to avoid. Found by the read-only test failing after the copy
+  landed.
+- **`Config.scratch_dir`, unset by default** — `None` means the system temp
+  directory. A default here would be this repo guessing at a host's layout; the
+  one writable mount on a locked-down host may be somewhere else.
+- **The failure path deletes its own half-built copy rather than deferring to
+  `atexit`** — the directory is created before the copy can be known to have
+  worked. Found by four abandoned directories in `/tmp` after four suite runs,
+  one per run of the permission test; a long-lived Streamlit process retrying a
+  failing open would strand one per attempt.
+
+### The error message
+
+- **`except Exception` around `get_collection` narrowed to
+  `chromadb.errors.NotFoundError`** — the broad clause reported a read-only
+  filesystem as `no 'ai_act' collection ... Run: python scripts/build_index.py`,
+  which sends someone to rebuild an index that is present and intact. The real
+  error it hid was `InternalError: attempt to write a readonly database`. That
+  message now appears only when the collection really is absent.
+
+### Testing
+
+- **Four new index tests and two config tests; 144 to 150** — that opening and
+  reading leaves every file's sha256 unchanged, that a read-only index opens,
+  that a permission failure does not name the build script, and that a failed
+  open leaves no scratch copy. All offline, all against the six-chunk fixture.
+- **One `chmod_tree` fixture that restores permissions on teardown** —
+  pytest's `tmp_path` cleanup cannot remove a tree it has no permission to
+  write, and that failure attaches itself to whichever test runs next.
+- **recall@5 unchanged at 0.83**, and `git status data/index/` is now empty
+  immediately after a full eval run, which is the check that says it worked.

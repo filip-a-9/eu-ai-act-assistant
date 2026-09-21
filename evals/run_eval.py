@@ -205,7 +205,7 @@ def main() -> int:
     top_k = args.top_k if args.top_k is not None else config.top_k
 
     questions = load_questions()
-    collection = open_collection(config.index_dir)
+    collection = open_collection(config.index_dir, config.scratch_dir)
     check_gold_exists(questions, collection)
     embedder = openai_embedder(config.openai_api_key, config.embed_model)
 

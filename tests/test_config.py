@@ -154,6 +154,24 @@ def test_absolute_paths_are_left_alone(isolated_env, tmp_path):
     assert load_config().index_dir == tmp_path
 
 
+def test_the_scratch_directory_is_unset_by_default(isolated_env):
+    # None, not a path: core/index.py copies the index somewhere writable
+    # before opening it, and unset means "wherever tempfile puts things on this
+    # platform". Baking a default in here would guess at a host's layout.
+    isolated_env.setenv("OPENAI_API_KEY", "sk-test")
+    assert load_config().scratch_dir is None
+
+
+def test_the_scratch_directory_can_be_pointed_at_a_writable_path(
+    isolated_env, tmp_path
+):
+    # The setting a locked-down host actually needs: the one writable mount it
+    # has may not be the system temp directory.
+    isolated_env.setenv("OPENAI_API_KEY", "sk-test")
+    isolated_env.setenv("SCRATCH_DIR", str(tmp_path))
+    assert load_config().scratch_dir == tmp_path
+
+
 def test_config_is_frozen(isolated_env):
     # Config is read by retrieval and generation on every query; a module that
     # mutates top_k in passing would be very hard to find.
@@ -188,5 +206,6 @@ def test_config_carries_no_fields_beyond_the_documented_set():
         "raw_dir",
         "chunks_dir",
         "index_dir",
+        "scratch_dir",
         "logs_dir",
     }

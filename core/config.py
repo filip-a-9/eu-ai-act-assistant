@@ -51,6 +51,19 @@ def _as_path(name: str, default: str) -> Path:
     return raw if raw.is_absolute() else PROJECT_ROOT / raw
 
 
+def _as_optional_path(name: str) -> Path | None:
+    """Like ``_as_path``, but unset means None rather than a baked-in default.
+
+    For settings whose sensible default is decided by the platform rather than
+    by this repo, where a literal here would be a guess at a host's layout.
+    """
+    raw = os.environ.get(name)
+    if not raw:
+        return None
+    path = Path(raw)
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+
 @dataclass(frozen=True)
 class Config:
     # repr=False keeps the key out of tracebacks and out of the per-query logs
@@ -64,6 +77,9 @@ class Config:
     raw_dir: Path
     chunks_dir: Path
     index_dir: Path
+    # Where the index is copied before it is opened. None means the system
+    # temp directory. See core/index.py::_writable_copy for why a copy exists.
+    scratch_dir: Path | None
     logs_dir: Path
 
 
@@ -109,5 +125,8 @@ def load_config() -> Config:
         raw_dir=_as_path("RAW_DIR", "data/raw"),
         chunks_dir=_as_path("CHUNKS_DIR", "data/chunks"),
         index_dir=_as_path("INDEX_DIR", "data/index"),
+        # Unset on purpose: the right writable location is a property of the
+        # host, and a default here would be this repo guessing at one.
+        scratch_dir=_as_optional_path("SCRATCH_DIR"),
         logs_dir=_as_path("LOGS_DIR", "data/logs"),
     )

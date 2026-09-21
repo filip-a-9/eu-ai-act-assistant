@@ -13,6 +13,9 @@ worse answers with no error anywhere.
 
 from __future__ import annotations
 
+import hashlib
+from pathlib import Path
+
 import pytest
 
 from core.index import COLLECTION_NAME, build, load_chunk_records, open_collection
@@ -249,6 +252,89 @@ def test_opening_a_directory_with_no_collection_names_the_script_too(tmp_path):
 def test_the_collection_name_is_stable(built_index):
     # Renaming it silently orphans every previously built index.
     assert open_collection(built_index).name == COLLECTION_NAME
+
+
+# ---------------------------------------------------------------------------
+# Opening must not write to the index it was given
+# ---------------------------------------------------------------------------
+
+# The index is committed to the repository, and Chroma's persistent client is a
+# read-write database rather than a file reader: connecting opens a write
+# transaction, and the first read flushes an HNSW buffer. Neither settles --
+# part of length.bin is serialised heap pointers, which ASLR re-randomises
+# every run -- so there is no stable version that could be committed once to
+# make it stop. These three pin the behaviour that keeps the committed index
+# untouched and lets a read-only host open it at all.
+
+
+def _tree_digest(root: Path) -> dict[str, str]:
+    """sha256 of every file under ``root``, keyed by relative path."""
+    return {
+        str(path.relative_to(root)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in sorted(Path(root).rglob("*"))
+        if path.is_file()
+    }
+
+
+@pytest.fixture
+def chmod_tree():
+    """Set a mode on every file under a directory, restoring it afterwards.
+
+    Restoring matters: pytest's own ``tmp_path`` cleanup cannot remove a tree
+    it has no permission to write, and that failure surfaces attached to
+    whichever test runs next, which is a confusing place to start looking.
+    """
+    touched: list[tuple[Path, int]] = []
+
+    def _apply(root: Path, mode: int) -> Path:
+        for path in Path(root).rglob("*"):
+            if path.is_file():
+                touched.append((path, path.stat().st_mode))
+                path.chmod(mode)
+        return root
+
+    yield _apply
+    for path, original in reversed(touched):
+        path.chmod(original)
+
+
+def test_opening_and_reading_does_not_modify_the_index_directory(built_index):
+    before = _tree_digest(built_index)
+    open_collection(built_index).count()
+    assert _tree_digest(built_index) == before
+
+
+def test_an_index_whose_files_are_read_only_still_opens(
+    built_index, tiny_corpus, chmod_tree
+):
+    # A container with a read-only rootfs is a common deployment default. The
+    # app is required to open a prebuilt index read-only, so this is that rule
+    # stated as something a machine can check.
+    collection = open_collection(chmod_tree(built_index, 0o444))
+    assert collection.count() == len(tiny_corpus)
+
+
+def test_a_permission_failure_is_not_reported_as_a_cancelled_build(
+    built_index, chmod_tree
+):
+    # An unreadable index cannot be rescued by copying it anywhere, so this one
+    # still has to fail -- the assertion is about *what it says*. Blaming a
+    # cancelled build sends someone to rebuild an index that is present and
+    # intact, which on a locked-down host is an expensive wrong turn.
+    with pytest.raises(RuntimeError) as excinfo:
+        open_collection(chmod_tree(built_index, 0o000))
+    assert "build_index.py" not in str(excinfo.value)
+
+
+def test_a_failed_open_leaves_no_scratch_copy_behind(built_index, chmod_tree, tmp_path):
+    # The copy is made before it can be known to succeed, so the failure path
+    # owns the half-built directory. Deferring it to interpreter exit is not
+    # enough: a long-lived Streamlit process that retries a failing open would
+    # accumulate one abandoned copy per attempt.
+    scratch = tmp_path / "scratch"
+    with pytest.raises(RuntimeError):
+        open_collection(chmod_tree(built_index, 0o000), scratch)
+    assert list(scratch.iterdir()) == []
 
 
 # ---------------------------------------------------------------------------

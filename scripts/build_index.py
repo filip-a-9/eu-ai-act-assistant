@@ -138,7 +138,7 @@ def main() -> int:
 
     # Reopened rather than trusting the handle that just wrote it: this is the
     # path the app will take, and it is the one worth proving works.
-    reopened = open_collection(config.index_dir)
+    reopened = open_collection(config.index_dir, config.scratch_dir)
     if reopened.count() != len(records):
         problems.append(
             f"reopened index holds {reopened.count()} chunks, expected {len(records)}"
