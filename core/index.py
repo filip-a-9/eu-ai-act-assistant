@@ -53,9 +53,7 @@ def load_chunk_records(chunks_dir: Path) -> list[dict[str, Any]]:
     """Read ``chunks.jsonl`` into a list of dicts, one per line."""
     path = Path(chunks_dir) / "chunks.jsonl"
     if not path.exists():
-        raise RuntimeError(
-            f"missing {path}. Run: python scripts/build_chunks.py"
-        )
+        raise RuntimeError(f"missing {path}. Run: python scripts/build_chunks.py")
     with path.open(encoding="utf-8") as handle:
         return [json.loads(line) for line in handle if line.strip()]
 
@@ -171,9 +169,7 @@ def build(
             batch = records[start : start + _WRITE_BATCH]
             collection.add(
                 ids=[record["id"] for record in batch],
-                embeddings=embedder.embed(
-                    [record["embed_text"] for record in batch]
-                ),
+                embeddings=embedder.embed([record["embed_text"] for record in batch]),
                 documents=[record["text"] for record in batch],
                 metadatas=[_metadata(record) for record in batch],
             )

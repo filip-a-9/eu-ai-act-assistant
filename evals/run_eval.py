@@ -188,11 +188,15 @@ def sweep(results_by_k: dict[int, list[Result]]) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Score retrieval over questions.yaml.")
     parser.add_argument(
-        "-k", "--top-k", type=int, default=None,
+        "-k",
+        "--top-k",
+        type=int,
+        default=None,
         help="how many chunks to retrieve (default: TOP_K from the environment)",
     )
     parser.add_argument(
-        "--sweep", action="store_true",
+        "--sweep",
+        action="store_true",
         help=f"also report recall and MRR at k = {', '.join(map(str, SWEEP))}",
     )
     args = parser.parse_args()

@@ -32,15 +32,15 @@ class Hit:
     a stage that adjusted a score in passing would be very hard to find.
     """
 
-    rank: int          # 1-based, best first
+    rank: int  # 1-based, best first
     id: str
-    score: float       # cosine similarity in [0, 1]; higher is better
-    article_no: str    # the citation label, never empty
+    score: float  # cosine similarity in [0, 1]; higher is better
+    article_no: str  # the citation label, never empty
     title: str
     chapter: str
-    kind: str          # article | annex | recital
+    kind: str  # article | annex | recital
     source_url: str
-    text: str          # the law, clean -- no citation header welded on
+    text: str  # the law, clean -- no citation header welded on
 
 
 def search(

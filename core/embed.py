@@ -28,8 +28,7 @@ BATCH_SIZE = 100
 class Embedder(Protocol):
     """Anything that can turn a list of texts into a list of vectors."""
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        ...
+    def embed(self, texts: list[str]) -> list[list[float]]: ...
 
 
 @dataclass(frozen=True)

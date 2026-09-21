@@ -46,9 +46,7 @@ def test_a_top_k_larger_than_the_corpus_returns_everything(
     assert len(hits) == len(tiny_corpus)
 
 
-def test_a_top_k_of_zero_returns_nothing_and_does_not_error(
-    collection, fake_embedder
-):
+def test_a_top_k_of_zero_returns_nothing_and_does_not_error(collection, fake_embedder):
     assert search(collection, fake_embedder, "prohibited practices", 0) == []
 
 
@@ -118,15 +116,11 @@ def test_a_question_about_risk_management_ranks_article_9_first(
 ):
     # Deliberately close to Article 6, which also talks about high risk: this
     # is the pair most likely to swap if the query vector is wrong.
-    hits = search(
-        collection, fake_embedder, "risk management system lifecycle", 3
-    )
+    hits = search(collection, fake_embedder, "risk management system lifecycle", 3)
     assert hits[0].id == "art_9.para_1"
 
 
-def test_different_questions_produce_different_orderings(
-    collection, fake_embedder
-):
+def test_different_questions_produce_different_orderings(collection, fake_embedder):
     # Guards the failure where the question is ignored and the corpus order is
     # returned every time -- which every test above would still pass if the
     # first chunk happened to be the expected one.
@@ -157,14 +151,19 @@ def test_a_hit_carries_the_clean_law_not_the_embedded_text(
         assert not hit.text.startswith(hit.article_no)
 
 
-def test_a_hit_carries_every_field_the_answer_surface_needs(
-    collection, fake_embedder
-):
+def test_a_hit_carries_every_field_the_answer_surface_needs(collection, fake_embedder):
     hit = search(collection, fake_embedder, "prohibited practices", 1)[0]
     assert isinstance(hit, Hit)
     for attribute in (
-        "rank", "id", "score", "article_no", "title",
-        "chapter", "kind", "source_url", "text",
+        "rank",
+        "id",
+        "score",
+        "article_no",
+        "title",
+        "chapter",
+        "kind",
+        "source_url",
+        "text",
     ):
         assert hasattr(hit, attribute)
 
@@ -193,9 +192,7 @@ def test_the_log_records_the_question_the_ids_and_the_scores(
     assert entry["scores"] == [hit.score for hit in hits]
 
 
-def test_the_log_carries_a_rewritten_question_slot(
-    tmp_path, collection, fake_embedder
-):
+def test_the_log_carries_a_rewritten_question_slot(tmp_path, collection, fake_embedder):
     # CLAUDE.md requires the rewritten question in the log. No rewrite node
     # exists yet, so the field is present and null rather than absent -- a
     # missing key would make the log format change when the graph lands.
@@ -214,9 +211,7 @@ def test_the_log_records_a_rewritten_question_when_given_one(
     assert entry["rewritten"] == "prohibited practices"
 
 
-def test_the_log_appends_rather_than_overwriting(
-    tmp_path, collection, fake_embedder
-):
+def test_the_log_appends_rather_than_overwriting(tmp_path, collection, fake_embedder):
     hits = search(collection, fake_embedder, "prohibited practices", 1)
     log_query("first", hits, tmp_path)
     log_query("second", hits, tmp_path)

@@ -53,8 +53,7 @@ SOURCES = [
         "filename": "oj_32024R1689.html",
         "role": "recitals only -- dropped from consolidated versions",
         "url": (
-            "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/"
-            "?uri=OJ:L_202401689"
+            "https://eur-lex.europa.eu/legal-content/EN/TXT/HTML/?uri=OJ:L_202401689"
         ),
     },
 ]

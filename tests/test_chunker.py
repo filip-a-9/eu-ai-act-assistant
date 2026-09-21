@@ -73,7 +73,17 @@ def test_annex_heading_with_non_breaking_space_still_yields_its_number(fixture_h
 def test_article_splits_into_one_chunk_per_numbered_paragraph(fixture_html):
     chunks = parse_consolidated(fixture_html("article_06_paragraphs.html"))
     assert [c.paragraph for c in chunks] == [
-        "1", "1a", "1b", "1c", "2", "3", "4", "5", "6", "7", "8",
+        "1",
+        "1a",
+        "1b",
+        "1c",
+        "2",
+        "3",
+        "4",
+        "5",
+        "6",
+        "7",
+        "8",
     ]
 
 
@@ -150,7 +160,9 @@ def test_normal_articles_report_no_folded_markers(fixture_html):
 def test_lettered_point_chunks_are_cited_by_their_letter(fixture_html):
     chunks = parse_consolidated(fixture_html("article_75b_nbsp_heading.html"))
     assert [c.article_no for c in chunks] == [
-        "Article 75b(a)", "Article 75b(b)", "Article 75b(c)",
+        "Article 75b(a)",
+        "Article 75b(b)",
+        "Article 75b(c)",
     ]
 
 
@@ -162,7 +174,8 @@ def test_lettered_point_chunks_are_cited_by_their_letter(fixture_html):
 def test_annex_with_sections_splits_at_them(fixture_html):
     chunks = parse_consolidated(fixture_html("annex_01_sections.html"))
     assert [c.article_no for c in chunks] == [
-        "Annex I, Section A", "Annex I, Section B",
+        "Annex I, Section A",
+        "Annex I, Section B",
     ]
 
 
@@ -250,9 +263,7 @@ def test_subdivision_labels_are_well_formed(every_chunk):
     # in the amendment articles are the way this goes wrong in practice.
     allowed = re.compile(r"|[0-9]+[a-z]*|[a-z]{1,2}|Section \S+")
     bad = [
-        (c.id, c.paragraph)
-        for c in every_chunk
-        if not allowed.fullmatch(c.paragraph)
+        (c.id, c.paragraph) for c in every_chunk if not allowed.fullmatch(c.paragraph)
     ]
     assert bad == []
 

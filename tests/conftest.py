@@ -53,12 +53,38 @@ def chunks_by_id():
 # simply contributes nothing, which is the behaviour a real embedder would
 # approximate for a term it has no signal for.
 VOCABULARY = (
-    "prohibited", "practices", "manipulate", "social", "scoring", "biometric",
-    "high", "risk", "classification", "annex", "safety", "component",
-    "management", "system", "iterative", "lifecycle", "documented",
-    "penalties", "fines", "administrative", "million", "turnover",
-    "trustworthy", "human", "oversight", "transparency", "principles",
-    "education", "employment", "law", "enforcement", "migration",
+    "prohibited",
+    "practices",
+    "manipulate",
+    "social",
+    "scoring",
+    "biometric",
+    "high",
+    "risk",
+    "classification",
+    "annex",
+    "safety",
+    "component",
+    "management",
+    "system",
+    "iterative",
+    "lifecycle",
+    "documented",
+    "penalties",
+    "fines",
+    "administrative",
+    "million",
+    "turnover",
+    "trustworthy",
+    "human",
+    "oversight",
+    "transparency",
+    "principles",
+    "education",
+    "employment",
+    "law",
+    "enforcement",
+    "migration",
 )
 
 _WORD = re.compile(r"[a-z]+")
@@ -89,8 +115,9 @@ class FakeEmbedder:
         return [value / length for value in raw]
 
 
-def _record(chunk_id, kind, article_no, number, paragraph, parent_id,
-            title, chapter, text):
+def _record(
+    chunk_id, kind, article_no, number, paragraph, parent_id, title, chapter, text
+):
     """Build one chunk record in the shape build_chunks.py writes."""
     return {
         "id": chunk_id,
@@ -119,41 +146,75 @@ def tiny_corpus():
     """Six records whose correct answers are obvious by inspection."""
     return [
         _record(
-            "art_5.para_1", "article", "Article 5(1)", "5", "1", "art_5",
-            "Prohibited AI practices", "Chapter II — PROHIBITED AI PRACTICES",
+            "art_5.para_1",
+            "article",
+            "Article 5(1)",
+            "5",
+            "1",
+            "art_5",
+            "Prohibited AI practices",
+            "Chapter II — PROHIBITED AI PRACTICES",
             "The following AI practices shall be prohibited: practices that "
             "manipulate a person, and social scoring of natural persons.",
         ),
         _record(
-            "art_6.para_1", "article", "Article 6(1)", "6", "1", "art_6",
+            "art_6.para_1",
+            "article",
+            "Article 6(1)",
+            "6",
+            "1",
+            "art_6",
             "Classification rules for high-risk AI systems",
             "Chapter III — HIGH-RISK AI SYSTEMS",
             "An AI system is high risk where it is intended to be used as a "
             "safety component of a product covered by Annex I.",
         ),
         _record(
-            "art_9.para_1", "article", "Article 9(1)", "9", "1", "art_9",
-            "Risk management system", "Chapter III — HIGH-RISK AI SYSTEMS",
+            "art_9.para_1",
+            "article",
+            "Article 9(1)",
+            "9",
+            "1",
+            "art_9",
+            "Risk management system",
+            "Chapter III — HIGH-RISK AI SYSTEMS",
             "A risk management system shall be established for high risk AI "
             "systems as a continuous iterative process across the lifecycle "
             "and shall be documented.",
         ),
         _record(
-            "art_99.para_3", "article", "Article 99(3)", "99", "3", "art_99",
-            "Penalties", "Chapter XII — PENALTIES",
+            "art_99.para_3",
+            "article",
+            "Article 99(3)",
+            "99",
+            "3",
+            "art_99",
+            "Penalties",
+            "Chapter XII — PENALTIES",
             "Non-compliance with the prohibited practices shall be subject to "
             "administrative fines of up to 35 million EUR or 7 % of turnover.",
         ),
         _record(
-            "anx_III.sec_1", "annex", "Annex III, Section 1", "III",
-            "Section 1", "anx_III", "High-risk AI systems referred to in "
-            "Article 6(2)", "",
+            "anx_III.sec_1",
+            "annex",
+            "Annex III, Section 1",
+            "III",
+            "Section 1",
+            "anx_III",
+            "High-risk AI systems referred to in Article 6(2)",
+            "",
             "Areas of high risk use: biometric identification, education, "
             "employment, law enforcement and migration.",
         ),
         _record(
-            "rct_27", "recital", "Recital 27", "27", "", "",
-            "Recital 27", "",
+            "rct_27",
+            "recital",
+            "Recital 27",
+            "27",
+            "",
+            "",
+            "Recital 27",
+            "",
             "Trustworthy AI rests on principles of human oversight and "
             "transparency, which guide the drawing up of codes of conduct.",
         ),

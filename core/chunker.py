@@ -55,16 +55,16 @@ class Chunk:
     """One retrievable, citable unit of the Regulation."""
 
     id: str
-    kind: str          # article | annex | recital
-    article_no: str    # the rendered citation label, never empty
-    number: str        # "6", "XIV", "27"
-    paragraph: str     # "1a", "a", "Section A" -- "" where not applicable
-    parent_id: str     # "" for whole units and recitals
+    kind: str  # article | annex | recital
+    article_no: str  # the rendered citation label, never empty
+    number: str  # "6", "XIV", "27"
+    paragraph: str  # "1a", "a", "Section A" -- "" where not applicable
+    parent_id: str  # "" for whole units and recitals
     title: str
-    chapter: str       # "" for recitals and annexes
+    chapter: str  # "" for recitals and annexes
     source_url: str
-    text: str          # the law, clean
-    embed_text: str    # citation header + text; what gets embedded
+    text: str  # the law, clean
+    embed_text: str  # citation header + text; what gets embedded
 
     def metadata(self) -> dict[str, str]:
         """The flat, all-string projection stored alongside the vector.
@@ -332,8 +332,7 @@ def _section_boundaries(children: list[Tag]) -> list[tuple[int, int, str]]:
     Returns (heading_index, content_start_index, heading_text) per section.
     """
     indices = [
-        i for i, c in enumerate(children)
-        if "title-gr-seq-level-1" in _classes(c)
+        i for i, c in enumerate(children) if "title-gr-seq-level-1" in _classes(c)
     ]
     boundaries: list[tuple[int, int, str]] = []
     skip = set()
@@ -357,16 +356,13 @@ def _annex_chunks(annex: Tag, canonical: str) -> list[Chunk]:
     heading = annex.find("p", class_="title-annex-1", recursive=False)
     subtitle = annex.find("p", class_="title-annex-2", recursive=False)
     number = (
-        normalise(heading.get_text(" ")).replace("ANNEX", "").strip()
-        if heading
-        else ""
+        normalise(heading.get_text(" ")).replace("ANNEX", "").strip() if heading else ""
     )
     annex_title = normalise(subtitle.get_text(" ")) if subtitle else ""
     url = f"{canonical}#{anx_id}"
 
     children = [
-        c for c in annex.find_all(recursive=False)
-        if not (_classes(c) & _ANNEX_SKIP)
+        c for c in annex.find_all(recursive=False) if not (_classes(c) & _ANNEX_SKIP)
     ]
     boundaries = _section_boundaries(children)
 

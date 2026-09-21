@@ -100,9 +100,7 @@ def main() -> int:
 
     if args.json:
         print(
-            json.dumps(
-                [hit_to_dict(hit) for hit in hits], ensure_ascii=False, indent=2
-            )
+            json.dumps([hit_to_dict(hit) for hit in hits], ensure_ascii=False, indent=2)
         )
         return 0
 

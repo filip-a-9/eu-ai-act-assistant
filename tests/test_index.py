@@ -56,9 +56,7 @@ def test_the_stored_document_is_the_clean_law_not_the_embedded_text(
         assert document == expected[chunk_id]
 
 
-def test_the_embedded_text_is_the_citation_header_plus_the_law(
-    tmp_path, tiny_corpus
-):
+def test_the_embedded_text_is_the_citation_header_plus_the_law(tmp_path, tiny_corpus):
     embedder = RecordingEmbedder()
     build(tiny_corpus, embedder, tmp_path / "index")
     assert embedder.seen == [record["embed_text"] for record in tiny_corpus]
@@ -77,8 +75,14 @@ def test_metadata_round_trips_with_every_value_a_string(built_index):
 def test_metadata_carries_every_field_the_chunker_produces(built_index):
     stored = open_collection(built_index).get(include=["metadatas"])
     expected = {
-        "kind", "article_no", "number", "paragraph",
-        "parent_id", "title", "chapter", "source_url",
+        "kind",
+        "article_no",
+        "number",
+        "paragraph",
+        "parent_id",
+        "title",
+        "chapter",
+        "source_url",
     }
     for metadata in stored["metadatas"]:
         assert set(metadata) == expected
@@ -160,9 +164,7 @@ def test_rebuilding_drops_records_that_are_no_longer_in_the_corpus(
     assert "rct_27" not in collection.get(include=[])["ids"]
 
 
-def test_building_an_empty_corpus_yields_an_empty_collection(
-    tmp_path, fake_embedder
-):
+def test_building_an_empty_corpus_yields_an_empty_collection(tmp_path, fake_embedder):
     build([], fake_embedder, tmp_path / "index")
     assert open_collection(tmp_path / "index").count() == 0
 
