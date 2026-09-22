@@ -30,7 +30,7 @@ from core.config import load_config
 from core.embed import openai_embedder
 from core.generate import Answer, openai_generator
 from core.graph import build_graph, run_turn
-from core.index import open_collection
+from core.index import open_bm25, open_collection
 
 WIDTH = 88
 
@@ -91,11 +91,13 @@ def main() -> int:
     config = load_config()
     graph = build_graph(
         collection=open_collection(config.index_dir, config.scratch_dir),
+        bm25=open_bm25(config.chunks_dir),
         embedder=openai_embedder(config.openai_api_key, config.embed_model),
         generator=openai_generator(
             config.openai_api_key, config.chat_model, config.temperature
         ),
         top_k=args.top_k if args.top_k is not None else config.top_k,
+        fusion_candidates=config.fusion_candidates,
         logs_dir=config.logs_dir,
     )
 

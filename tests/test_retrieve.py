@@ -20,12 +20,26 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from core.index import build, open_collection
-from core.retrieve import Hit, log_query, search
+from core.retrieve import Hit, fuse, hybrid_search, log_query, search
 
 
 @pytest.fixture
 def collection(built_index):
     return open_collection(built_index)
+
+
+@pytest.fixture
+def empty_collection(tmp_path, fake_embedder):
+    """A real but empty Chroma collection: what a half-built index looks like.
+
+    Also the only way to make the dense side contribute nothing on purpose.
+    ``FakeEmbedder`` maps a question of purely out-of-vocabulary words to the
+    constant dimension alone, which a chunk of purely out-of-vocabulary words
+    matches at 1.0 -- so "the embedder cannot see this" cannot be staged by
+    choosing words. Emptying the collection states it directly.
+    """
+    build([], fake_embedder, tmp_path / "empty")
+    return open_collection(tmp_path / "empty")
 
 
 # ---------------------------------------------------------------------------
@@ -299,3 +313,266 @@ def test_the_log_never_contains_an_api_key(tmp_path, collection, fake_embedder):
     hits = search(collection, fake_embedder, "prohibited practices", 2)
     log_query("prohibited practices", hits, tmp_path)
     assert "sk-" not in (tmp_path / "queries.jsonl").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# The lexical half
+# ---------------------------------------------------------------------------
+
+
+def test_bm25_finds_a_chunk_by_a_term_the_embedder_cannot_represent(bm25_index):
+    # "sandbox" is outside FakeEmbedder's VOCABULARY, so the dense side maps
+    # this question to no direction at all. This is the miniature of the real
+    # problem: an exact, rare token that an embedding blurs away.
+    found = bm25_index.search("regulatory sandbox", 5)
+    assert found[0][0]["id"] == "art_57.para_1"
+
+
+def test_bm25_does_not_return_chunks_that_share_no_terms(bm25_index):
+    # A zero-score chunk matched nothing. Returning it as a candidate would
+    # hand it fusion credit for merely being in the list, which is how a
+    # lexical retriever poisons a ranking it had no opinion about.
+    found = bm25_index.search("regulatory sandbox", 7)
+    assert [record["id"] for record, _ in found] == ["art_57.para_1"]
+
+
+def test_bm25_returns_no_candidates_when_nothing_matches(bm25_index):
+    assert bm25_index.search("xyzzy plugh", 5) == []
+
+
+def test_bm25_over_an_empty_corpus_returns_nothing_rather_than_raising():
+    # A fresh clone has no chunks.jsonl content until build_chunks.py runs,
+    # and BM25Okapi divides by the average document length on construction.
+    # Retrieval degrading to dense-only is recoverable; a ZeroDivisionError
+    # at import time is not.
+    from core.retrieve import Bm25Index
+
+    assert Bm25Index.from_records([]).search("anything", 5) == []
+
+
+def test_bm25_ranks_are_one_based_and_sequential(bm25_index):
+    found = bm25_index.search("high risk system", 4)
+    assert [rank for _, rank in found] == list(range(1, len(found) + 1))
+
+
+def test_bm25_matches_the_citation_header_not_only_the_body(bm25_index):
+    # The header is in embed_text and nowhere in text. "Annex III" is the
+    # canonical case: the label is the thing a person types.
+    found = bm25_index.search("Annex III", 3)
+    assert found[0][0]["id"] == "anx_III.sec_1"
+
+
+# ---------------------------------------------------------------------------
+# Fusion mechanics -- fuse() is exercised directly, with ranks chosen by hand,
+# so the expected score is arithmetic rather than a restatement of the code.
+# ---------------------------------------------------------------------------
+
+
+def _dense_hit(chunk_id, rank, score=0.5):
+    return Hit(
+        rank=rank,
+        id=chunk_id,
+        score=score,
+        article_no=chunk_id,
+        title="",
+        chapter="",
+        kind="article",
+        source_url="https://example.invalid",
+        text="",
+        dense_rank=rank,
+        dense_score=score,
+    )
+
+
+def _lexical(chunk_id, rank):
+    return (
+        {
+            "id": chunk_id,
+            "article_no": chunk_id,
+            "title": "",
+            "chapter": "",
+            "kind": "article",
+            "source_url": "https://example.invalid",
+            "text": "",
+        },
+        rank,
+    )
+
+
+def test_the_fused_score_sums_the_reciprocal_of_each_rank():
+    fused = fuse([_dense_hit("a", 1)], [_lexical("a", 3)], 1)
+    assert fused[0].score == pytest.approx(1 / 61 + 1 / 63)
+
+
+def test_a_chunk_only_the_dense_side_found_carries_no_bm25_rank():
+    fused = fuse([_dense_hit("a", 1)], [], 1)
+    assert fused[0].dense_rank == 1 and fused[0].bm25_rank is None
+    assert fused[0].score == pytest.approx(1 / 61)
+
+
+def test_a_chunk_only_bm25_found_carries_no_dense_rank_or_score():
+    fused = fuse([], [_lexical("a", 1)], 1)
+    assert fused[0].bm25_rank == 1
+    assert fused[0].dense_rank is None and fused[0].dense_score is None
+
+
+def test_a_chunk_both_sides_found_appears_once():
+    fused = fuse([_dense_hit("a", 1)], [_lexical("a", 1)], 5)
+    assert [hit.id for hit in fused] == ["a"]
+
+
+def test_agreement_between_the_two_sides_outranks_a_single_strong_opinion():
+    # The property RRF exists for: a chunk both retrievers placed modestly
+    # beats one that only a single retriever loved. Neither retriever can
+    # carry a result on its own.
+    fused = fuse(
+        [_dense_hit("agreed", 3), _dense_hit("dense-only", 1)],
+        [_lexical("agreed", 3)],
+        2,
+    )
+    assert [hit.id for hit in fused] == ["agreed", "dense-only"]
+
+
+def test_a_chunk_buried_by_dense_is_rescued_by_a_strong_lexical_rank():
+    # The Annex III shape, as arithmetic: the real corpus put a gold chunk
+    # below dense rank 50 while BM25 ranked it first, and the fused result has
+    # to pull it above a chunk dense merely liked. Stated at fuse() level
+    # because a seven-chunk fixture has no rank 40 to be buried at, and
+    # rescue-at-depth is the property, not the fixture's ordering.
+    fused = fuse(
+        [_dense_hit("buried", 40), _dense_hit("comfortable", 4)],
+        [_lexical("buried", 1)],
+        2,
+    )
+    assert [hit.id for hit in fused] == ["buried", "comfortable"]
+    assert fused[0].dense_rank == 40 and fused[0].bm25_rank == 1
+
+
+def test_a_chunk_one_side_ranked_hopelessly_does_not_drag_the_other_down():
+    # The converse, and the reason fusion is on rank rather than score: BM25
+    # put a gold chunk at 724 of 901 on the real corpus. A retriever that
+    # wrong must be unable to overrule one that is right.
+    fused = fuse(
+        [_dense_hit("correct", 1)],
+        [_lexical("correct", 724), _lexical("noise", 1)],
+        2,
+    )
+    assert [hit.id for hit in fused] == ["correct", "noise"]
+
+
+def test_fused_ranks_are_renumbered_one_based_and_sequential():
+    fused = fuse([_dense_hit("a", 1), _dense_hit("b", 2)], [_lexical("c", 1)], 3)
+    assert [hit.rank for hit in fused] == [1, 2, 3]
+
+
+def test_fusion_truncates_to_top_k():
+    fused = fuse([_dense_hit("a", 1), _dense_hit("b", 2)], [_lexical("c", 1)], 2)
+    assert len(fused) == 2
+
+
+def test_a_tie_is_broken_deterministically():
+    # A dense-only chunk at rank 1 and a BM25-only chunk at rank 1 score
+    # identically. Without a rule the order is dict insertion order, which
+    # makes two eval runs over one corpus disagree and every delta unreadable.
+    first = fuse([_dense_hit("zzz", 1)], [_lexical("aaa", 1)], 2)
+    second = fuse([_dense_hit("zzz", 1)], [_lexical("aaa", 1)], 2)
+    assert [h.id for h in first] == [h.id for h in second] == ["zzz", "aaa"]
+
+
+# ---------------------------------------------------------------------------
+# hybrid_search -- the two halves wired together
+# ---------------------------------------------------------------------------
+
+
+def test_hybrid_still_answers_a_question_the_dense_side_handles_alone(
+    collection, bm25_index, fake_embedder
+):
+    hits = hybrid_search(
+        collection,
+        bm25_index,
+        fake_embedder,
+        "which AI practices are prohibited",
+        3,
+        10,
+    )
+    assert hits[0].id == "art_5.para_1"
+
+
+def test_fusion_preserves_the_dense_rank_and_cosine_it_was_given(
+    collection, bm25_index, fake_embedder
+):
+    # fuse() overwrites rank and score with the fused values, and must leave
+    # the dense provenance alone -- it is what tells an eval miss apart from a
+    # ranking problem. Cross-checked against search() rather than against a
+    # constant, so it states "fusion changed nothing here" and not a cosine.
+    question = "which AI practices are prohibited"
+    dense = {hit.id: hit for hit in search(collection, fake_embedder, question, 7)}
+    hits = hybrid_search(collection, bm25_index, fake_embedder, question, 5, 10)
+    for hit in hits:
+        assert hit.dense_rank == dense[hit.id].rank
+        assert hit.dense_score == dense[hit.id].score
+        # And the fused score really is a different number from the cosine.
+        assert hit.score != hit.dense_score
+
+
+def test_hybrid_returns_nothing_for_a_top_k_of_zero(
+    collection, bm25_index, fake_embedder
+):
+    assert hybrid_search(collection, bm25_index, fake_embedder, "risk", 0, 10) == []
+
+
+def test_hybrid_over_an_empty_collection_still_returns_lexical_hits(
+    empty_collection, bm25_index, fake_embedder
+):
+    # An empty vector store is what a half-built index looks like. Retrieval
+    # degrading to lexical-only beats returning nothing, and either way it
+    # must not raise.
+    hits = hybrid_search(
+        empty_collection, bm25_index, fake_embedder, "regulatory sandbox", 3, 10
+    )
+    assert [hit.id for hit in hits] == ["art_57.para_1"]
+    assert hits[0].dense_rank is None and hits[0].dense_score is None
+
+
+def test_a_lexical_only_hit_carries_the_citation_the_answer_will_quote(
+    empty_collection, bm25_index, fake_embedder
+):
+    # A lexical-only hit is built from the chunk record rather than from
+    # Chroma, so it is the one that could silently arrive without a citation --
+    # and the generator refuses anything it cannot cite. Driven through an
+    # empty vector store so the dense path cannot supply the fields by luck.
+    hits = hybrid_search(
+        empty_collection, bm25_index, fake_embedder, "regulatory sandbox", 1, 10
+    )
+    assert hits[0].article_no == "Article 57(1)"
+    assert hits[0].title == "AI regulatory sandboxes"
+    assert hits[0].kind == "article"
+    assert hits[0].source_url.startswith("https://")
+    assert "regulatory sandbox" in hits[0].text
+
+
+def test_hybrid_ranks_are_one_based_and_sequential(
+    collection, bm25_index, fake_embedder
+):
+    hits = hybrid_search(collection, bm25_index, fake_embedder, "high risk", 5, 10)
+    assert [hit.rank for hit in hits] == [1, 2, 3, 4, 5]
+
+
+# ---------------------------------------------------------------------------
+# The log gains the component ranks
+# ---------------------------------------------------------------------------
+
+
+def test_the_log_records_which_retriever_found_each_chunk(
+    tmp_path, empty_collection, bm25_index, fake_embedder
+):
+    # Through an empty vector store, so the null in dense_ranks is a fact
+    # about provenance rather than an accident of the fixture's ordering.
+    hits = hybrid_search(
+        empty_collection, bm25_index, fake_embedder, "regulatory sandbox", 2, 10
+    )
+    log_query("regulatory sandbox", hits, tmp_path)
+    entry = json.loads((tmp_path / "queries.jsonl").read_text(encoding="utf-8"))
+    assert entry["bm25_ranks"][0] == 1
+    assert entry["dense_ranks"][0] is None
+    assert len(entry["dense_ranks"]) == len(entry["chunk_ids"])

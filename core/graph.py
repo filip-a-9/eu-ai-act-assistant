@@ -25,7 +25,7 @@ from langgraph.graph import END, START, StateGraph
 
 from core.embed import Embedder
 from core.generate import Answer, Generator, answer, rewrite
-from core.retrieve import Hit, log_query, search
+from core.retrieve import Bm25Index, Hit, hybrid_search, log_query
 
 
 class State(TypedDict, total=False):
@@ -46,12 +46,14 @@ class State(TypedDict, total=False):
 def build_graph(
     *,
     collection: Any,
+    bm25: Bm25Index,
     embedder: Embedder,
     generator: Generator,
     top_k: int,
+    fusion_candidates: int,
     logs_dir: Path,
 ):
-    """Compile the graph over the given index, embedder and generator."""
+    """Compile the graph over the given retrievers, embedder and generator."""
 
     def rewrite_node(state: State) -> State:
         return {
@@ -59,7 +61,14 @@ def build_graph(
         }
 
     def retrieve_node(state: State) -> State:
-        hits = search(collection, embedder, _search_question(state), top_k)
+        hits = hybrid_search(
+            collection,
+            bm25,
+            embedder,
+            _search_question(state),
+            top_k,
+            fusion_candidates,
+        )
         # The one place a query is logged. Putting it in the node rather than
         # in the CLI means the app, the CLI and any future caller all log,
         # because none of them can retrieve without passing through here.

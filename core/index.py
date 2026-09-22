@@ -35,6 +35,7 @@ from typing import Any
 import chromadb
 
 from core.embed import Embedder
+from core.retrieve import Bm25Index
 
 COLLECTION_NAME = "ai_act"
 
@@ -260,6 +261,22 @@ def open_collection(index_dir: Path, scratch_dir: Path | None = None):
             f"exists but holds no index, which is what a cancelled build leaves "
             f"behind. Run: python scripts/build_index.py"
         ) from exc
+
+
+def open_bm25(chunks_dir: Path) -> Bm25Index:
+    """Build the lexical index in memory from the committed corpus file.
+
+    Kept separate from ``open_collection`` rather than folded into one
+    ``open_retriever``. The two fail for unrelated reasons -- that one copies a
+    Chroma database somewhere writable, this one reads a text file -- and a
+    combined function would have to report both in one message. The three call
+    sites can open two things.
+
+    No API key, no network, and nothing persisted: ``load_chunk_records``
+    already raises naming ``build_chunks.py`` when the corpus is missing, which
+    is the only failure this can have.
+    """
+    return Bm25Index.from_records(load_chunk_records(Path(chunks_dir)))
 
 
 def _metadata(record: dict[str, Any]) -> dict[str, str]:

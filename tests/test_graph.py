@@ -26,7 +26,7 @@ REWRITTEN = "What are the penalties for prohibited practices?"
 
 
 @pytest.fixture
-def graph_for(tmp_path, built_index, fake_embedder):
+def graph_for(tmp_path, built_index, bm25_index, fake_embedder):
     """Build a graph over the tiny index, with the generator supplied per test."""
     collection = open_collection(built_index)
     logs_dir = tmp_path / "logs"
@@ -35,9 +35,11 @@ def graph_for(tmp_path, built_index, fake_embedder):
         return (
             build_graph(
                 collection=collection,
+                bm25=bm25_index,
                 embedder=fake_embedder,
                 generator=generator,
                 top_k=top_k,
+                fusion_candidates=10,
                 logs_dir=logs_dir,
             ),
             logs_dir,
@@ -133,3 +135,16 @@ def test_a_refused_turn_ships_no_sources(graph_for, fake_generator):
 
     assert answer.text == REFUSAL_TEXT
     assert answer.hits == ()
+
+
+def test_the_graph_retrieves_through_both_retrievers(graph_for, fake_generator):
+    # The node is the one place a query is logged, so the log is where it
+    # shows whether retrieval went through fusion or through dense alone.
+    # Without this, the graph could quietly keep calling search().
+    graph, logs_dir = graph_for(fake_generator(ANSWER))
+    run_turn(graph, "which practices are prohibited?", history=[])
+    entry = log_lines(logs_dir)[0]
+    assert "dense_ranks" in entry and "bm25_ranks" in entry
+    assert len(entry["bm25_ranks"]) == len(entry["chunk_ids"])
+    # Something was found lexically: a dense-only path leaves these all null.
+    assert any(rank is not None for rank in entry["bm25_ranks"])

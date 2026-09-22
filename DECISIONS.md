@@ -933,3 +933,120 @@ Recall plateaus at 0.92 by k=10 and does not improve through k=20.
   lines of counting into `core/` to make them testable was declined as more
   structure than the logic earns; recorded so the gap is a decision rather
   than an oversight.
+
+## Phase 10 — hybrid retrieval: BM25 fused with the vectors (2026-09-22)
+
+Phase 2 deferred `rank_bm25` on one condition: *a weight chosen before there is
+a recall number to move is chosen by taste.* The number existed, so the
+retriever was built. It ships, and it costs recall. Both halves of that are
+recorded here.
+
+### What was built
+
+- **Reciprocal Rank Fusion, unweighted** — each retriever contributes
+  `1 / (60 + rank)` and the sums are sorted. Rank-based fusion needs no score
+  normalisation between a bounded cosine and an unbounded BM25 score, and no
+  per-retriever weight. `RRF_K = 60` is a module constant in `core/retrieve.py`,
+  not config: it is a property of the algorithm, not a dial a deployment turns.
+- **`fusion_candidates` (default 50) is config** — how deep each retriever
+  reaches before fusion is the latency-against-recall trade a deployment may
+  need to make.
+- **BM25 is built in memory at open time from `data/chunks/chunks.jsonl`** —
+  measured at 40 ms for 901 chunks, with no API key and nothing persisted. A
+  second committed artifact beside the vectors is a second thing that can go
+  stale against them, and `rank_bm25` recomputes its IDF table on construction
+  regardless, so persisting would have saved about half of that 40 ms and
+  bought a synchronisation problem.
+- **BM25 indexes `embed_text`, not `text`** — the citation header is where
+  "Annex III, point 1" exists as literal tokens, which is the exact-match case
+  a lexical retriever is here to serve, and it is what the vectors were built
+  from, so both sides read one string.
+- **`Hit` carries `dense_rank`, `bm25_rank` and `dense_score`, each `None`
+  where that retriever never saw the chunk** — after fusion `score` is an RRF
+  value around 0.03 and means nothing on its own, so `scripts/query.py` and the
+  eval's miss report print `[d2 b3]` instead. A gold chunk at `d400 b1` was
+  rescued lexically; one at `d3 b-` means BM25 abstained; one absent from both
+  is an embedding problem rather than a ranking one. The query log gains
+  `dense_ranks` and `bm25_ranks` additively, so lines written before this phase
+  stay parseable.
+
+### What it cost
+
+| top_k = 5 | before | after |
+|---|---|---|
+| any expected chunk | 0.86 | **0.58** |
+| all expected chunks | 0.64 | **0.39** |
+| MRR@5 | 0.678 | **0.490** |
+| statutory group (n=28), any | 1.00 | **0.68** |
+| lay group (n=8), any | 0.38 | **0.25** |
+
+    k    any    all    MRR
+    1    0.44   0.19   0.444
+    3    0.50   0.31   0.472
+    5    0.58   0.39   0.490
+    10   0.75   0.53   0.513
+    20   0.92   0.72   0.524
+
+- **The mechanism is the equal vote, not a bug** — `fuse(dense, [], k)` was
+  confirmed to reproduce the dense ordering exactly. A chunk at dense rank 1
+  that BM25 never returned scores `1/61 = 0.0164`; a chunk at dense rank 2 that
+  BM25 ranked third scores `1/62 + 1/63 = 0.0320`. Appearing anywhere in BM25's
+  top 50 is worth more than being the vector store's single best hit. RRF's
+  equal weighting asserts that both rankings are worth trusting, and on this
+  corpus that assertion is false.
+- **Measured on `prohibited-practices`** — gold `art_5.para_1` was dense rank 1
+  and is now absent from the top five, displaced by `art_5.para_8 [d2 b3]`,
+  `rct_29 [d5 b1]` and `art_5.para_1b [d3 b7]`.
+- **Recall at depth is unchanged: 0.92 at k = 20, matching dense-only** — the
+  gold chunks are still retrieved. What the fusion damaged is their position
+  inside the cut, which makes this a ranking result rather than a retrieval one.
+- **BM25 alone, measured before the build** — over the eight lay-phrased
+  questions it put a gold chunk in the top five once, against dense's three.
+  It wins `lay-cv-screening` outright, where Annex III point 4 contains
+  "analyse and filter job applications" verbatim and ranks first lexically
+  against a dense miss. That question now retrieves its Annex III chunk.
+
+### Alternatives measured and not taken
+
+Swept offline over one embedding pass, varying the fusion rule in memory:
+
+    bm25 variant / weight / depth      any@5  all@5   stat    lay
+    dense only                          0.86   0.64   1.00   0.38
+    plain  w=1.0 d=50  (shipped)        0.58   0.39   0.68   0.25
+    plain  w=0.1 d=50                   0.83   0.64   0.96   0.38
+    no-stopwords  w=1.0 d=50            0.64   0.42   0.71   0.38
+    no-stopwords  w=0.25 d=50           0.78   0.61   0.89   0.38
+    no-stopwords  w=1.0 d=3             0.86   0.61   1.00   0.38
+    body-only  w=1.0 d=50               0.58   0.36   0.68   0.25
+
+- **No configuration improves the lay group** — it holds at 0.38 across every
+  weight, depth and tokeniser tried, including the dense-only baseline. The
+  group this retriever was built to move does not move.
+- **Stopword removal is the one real gain, and it was not taken** — 0.58 to
+  0.64 unweighted. Shipping it would mean a stopword list in the retrieval path
+  chosen to improve a number that still loses to dense-only, which is tuning
+  toward parity rather than toward a result.
+- **A per-retriever weight was not added** — the rows that reach parity do it
+  by turning the lexical contribution down until it stops doing harm, which is
+  the same as not having it, with a second index to maintain. Phase 2's rule
+  against a weight chosen on taste applies equally to one chosen to hide a
+  regression.
+
+### Testing
+
+- **Fusion mechanics are pytest; ranking quality is the eval** — `fuse()` is
+  exercised directly with ranks chosen by hand, so the expected RRF score is
+  arithmetic rather than a restatement of the code. Rescue-at-depth is stated
+  there too: a seven-chunk fixture has no rank 40 to be buried at.
+- **The tiny corpus gained a seventh chunk built from out-of-vocabulary terms**
+  — `art_57.para_1`, on regulatory sandboxes. It is what makes the lexical half
+  testable at fixture scale.
+- **"The embedder cannot see this" cannot be staged by choosing words** —
+  `FakeEmbedder` maps a question of purely out-of-vocabulary terms to the
+  constant dimension alone, which a chunk of purely out-of-vocabulary terms
+  matches at 1.0. Tests needing a silent dense side drive an empty collection
+  instead, which states it directly.
+- **Ties are broken on `(-fused, found-by-dense, chunk_id)`** — a dense-only
+  chunk at rank 1 and a lexical-only chunk at rank 1 score identically, and
+  ordering them by dict insertion would make two runs over one corpus disagree.
+  An eval delta that moves for that reason is unreadable.

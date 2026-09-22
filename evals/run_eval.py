@@ -31,8 +31,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.config import load_config
 from core.embed import openai_embedder
-from core.index import open_collection
-from core.retrieve import Hit, search
+from core.index import open_bm25, open_collection
+from core.retrieve import Bm25Index, Hit, hybrid_search
 
 QUESTIONS_PATH = Path(__file__).parent / "questions.yaml"
 SWEEP = (1, 3, 5, 10, 20)
@@ -124,10 +124,19 @@ def check_gold_exists(questions: list[Question], collection) -> None:
         )
 
 
-def run(questions: list[Question], collection, embedder, top_k: int) -> list[Result]:
+def run(
+    questions: list[Question],
+    collection,
+    bm25: Bm25Index,
+    embedder,
+    top_k: int,
+    candidates: int,
+) -> list[Result]:
     results = []
     for question in questions:
-        hits = search(collection, embedder, question.question, top_k)
+        hits = hybrid_search(
+            collection, bm25, embedder, question.question, top_k, candidates
+        )
         results.append(Result(question=question, hits=hits))
     return results
 
@@ -160,6 +169,19 @@ def mrr(results: list[Result], k: int) -> float:
         if rank is not None and rank <= k:
             total += 1.0 / rank
     return total / len(results)
+
+
+def provenance(hit: Hit) -> str:
+    """``art_5.para_1 [d1 b4]`` -- where each retriever placed this chunk.
+
+    Printed instead of the fused score, which after RRF is about 0.03 and says
+    nothing on its own. These two numbers do: a gold chunk at ``d400 b1`` was
+    rescued by the lexical side, one at ``d3 b-`` means BM25 abstained, and one
+    absent from both is an embedding problem rather than a ranking one.
+    """
+    dense = f"d{hit.dense_rank}" if hit.dense_rank is not None else "d-"
+    lexical = f"b{hit.bm25_rank}" if hit.bm25_rank is not None else "b-"
+    return f"{hit.id} [{dense} {lexical}]"
 
 
 def report(results: list[Result], top_k: int) -> None:
@@ -199,7 +221,7 @@ def report(results: list[Result], top_k: int) -> None:
             print(f"\n  {result.question.id}")
             print(f"    asked     {result.question.question}")
             print(f"    wanted    {', '.join(result.question.expect)}")
-            got = ", ".join(f"{hit.id} ({hit.score:.2f})" for hit in result.hits[:5])
+            got = ", ".join(provenance(hit) for hit in result.hits[:5])
             print(f"    got       {got or '(nothing)'}")
 
         # A gold chunk sitting just outside the cut is a different problem from
@@ -262,17 +284,27 @@ def main() -> int:
 
     questions = load_questions()
     collection = open_collection(config.index_dir, config.scratch_dir)
+    bm25 = open_bm25(config.chunks_dir)
     check_gold_exists(questions, collection)
     embedder = openai_embedder(config.openai_api_key, config.embed_model)
 
-    results = run(questions, collection, embedder, top_k)
+    results = run(
+        questions, collection, bm25, embedder, top_k, config.fusion_candidates
+    )
     report(results, top_k)
 
     if args.sweep:
         # Retrieved once at the largest k and truncated, rather than querying
         # five times: the ranking is identical and it is four fewer API calls
         # per question.
-        widest = run(questions, collection, embedder, max(SWEEP))
+        widest = run(
+            questions,
+            collection,
+            bm25,
+            embedder,
+            max(SWEEP),
+            config.fusion_candidates,
+        )
         sweep({k: widest for k in SWEEP})
 
     return 0

@@ -143,7 +143,12 @@ def fake_embedder():
 
 @pytest.fixture
 def tiny_corpus():
-    """Six records whose correct answers are obvious by inspection."""
+    """Seven records whose correct answers are obvious by inspection.
+
+    The last one carries vocabulary ``FakeEmbedder`` cannot represent, which is
+    what makes the lexical half of hybrid retrieval testable here. See the note
+    on ``VOCABULARY`` above.
+    """
     return [
         _record(
             "art_5.para_1",
@@ -218,7 +223,33 @@ def tiny_corpus():
             "Trustworthy AI rests on principles of human oversight and "
             "transparency, which guide the drawing up of codes of conduct.",
         ),
+        # Deliberately built from terms outside VOCABULARY. FakeEmbedder maps
+        # every word here to nothing, so the dense retriever is structurally
+        # blind to this chunk -- exactly as the real embedder blurs "Annex III"
+        # into a generic annex-shaped direction. Anything that finds it found
+        # it lexically, which is the property hybrid retrieval exists to add.
+        _record(
+            "art_57.para_1",
+            "article",
+            "Article 57(1)",
+            "57",
+            "1",
+            "art_57",
+            "AI regulatory sandboxes",
+            "Chapter VI — MEASURES IN SUPPORT OF INNOVATION",
+            "Member States shall ensure that a regulatory sandbox is "
+            "established for the development and testing of innovative "
+            "products before their placing on the market.",
+        ),
     ]
+
+
+@pytest.fixture
+def bm25_index(tiny_corpus):
+    """The lexical half of retrieval over the same seven records."""
+    from core.retrieve import Bm25Index
+
+    return Bm25Index.from_records(tiny_corpus)
 
 
 @pytest.fixture

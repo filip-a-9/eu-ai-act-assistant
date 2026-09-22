@@ -18,7 +18,13 @@ from pathlib import Path
 
 import pytest
 
-from core.index import COLLECTION_NAME, build, load_chunk_records, open_collection
+from core.index import (
+    COLLECTION_NAME,
+    build,
+    load_chunk_records,
+    open_bm25,
+    open_collection,
+)
 
 
 class RecordingEmbedder:
@@ -357,3 +363,42 @@ def test_load_chunk_records_names_the_script_that_writes_the_file(tmp_path):
     with pytest.raises(RuntimeError) as excinfo:
         load_chunk_records(tmp_path / "nothing-here")
     assert "build_chunks.py" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------
+# The lexical index, built from the same corpus file
+# ---------------------------------------------------------------------------
+
+
+def _write_chunks(chunks_dir: Path, records) -> Path:
+    import json
+
+    chunks_dir.mkdir(parents=True, exist_ok=True)
+    with (chunks_dir / "chunks.jsonl").open("w", encoding="utf-8") as handle:
+        for record in records:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return chunks_dir
+
+
+def test_open_bm25_indexes_every_chunk_in_the_corpus_file(tmp_path, tiny_corpus):
+    bm25 = open_bm25(_write_chunks(tmp_path / "chunks", tiny_corpus))
+    # Every record is reachable: a term unique to the last one still finds it.
+    found = bm25.search("regulatory sandbox", 5)
+    assert found[0][0]["id"] == "art_57.para_1"
+
+
+def test_open_bm25_names_the_script_that_writes_the_corpus(tmp_path):
+    # The same failure as the vector index's: a missing corpus is a missing
+    # build step, and the message has to say which one.
+    with pytest.raises(RuntimeError) as excinfo:
+        open_bm25(tmp_path / "nothing-here")
+    assert "build_chunks.py" in str(excinfo.value)
+
+
+def test_open_bm25_does_not_need_an_api_key_or_the_vector_index(
+    tmp_path, monkeypatch, tiny_corpus
+):
+    # The reason this is built in memory rather than persisted beside the
+    # vectors: it depends on nothing but a text file already in the repository.
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    assert open_bm25(_write_chunks(tmp_path / "chunks", tiny_corpus)).search("risk", 1)

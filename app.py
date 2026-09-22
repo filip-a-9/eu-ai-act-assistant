@@ -24,7 +24,7 @@ from core.config import load_config
 from core.embed import openai_embedder
 from core.generate import Answer, link_citations, openai_generator
 from core.graph import build_graph, run_turn
-from core.index import open_collection
+from core.index import open_bm25, open_collection
 
 DISCLAIMER = (
     "Not legal advice. Answers are generated from the text of Regulation (EU) "
@@ -53,11 +53,13 @@ def _assistant():
     config = load_config()
     graph = build_graph(
         collection=open_collection(config.index_dir, config.scratch_dir),
+        bm25=open_bm25(config.chunks_dir),
         embedder=openai_embedder(config.openai_api_key, config.embed_model),
         generator=openai_generator(
             config.openai_api_key, config.chat_model, config.temperature
         ),
         top_k=config.top_k,
+        fusion_candidates=config.fusion_candidates,
         logs_dir=config.logs_dir,
     )
     return config, graph

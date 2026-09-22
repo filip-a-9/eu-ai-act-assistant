@@ -72,6 +72,7 @@ class Config:
     embed_model: str
     chat_model: str
     top_k: int
+    fusion_candidates: int
     temperature: float
     max_questions: int
     max_questions_per_ip: int
@@ -114,6 +115,14 @@ def load_config() -> Config:
         embed_model=os.environ.get("EMBED_MODEL", "text-embedding-3-small"),
         chat_model=os.environ.get("CHAT_MODEL", "gpt-5.6-terra"),
         top_k=_as_int("TOP_K", "5"),
+        # How many candidates each retriever contributes before the two
+        # rankings are fused. Ten times top_k: a chunk the vector store ranks
+        # poorly is only rescuable if BM25 reached deep enough to see it, and
+        # fusing 50 rank positions costs nothing measurable. Here rather than
+        # as a literal in retrieve.py because it is the dial a deployment
+        # trades latency against recall on. The RRF constant is not: it is a
+        # property of the algorithm, and lives in core/retrieve.py.
+        fusion_candidates=_as_int("FUSION_CANDIDATES", "50"),
         # 1.0, not 0.0: gpt-5.6 accepts only its default temperature and
         # returns a 400 for anything else. Answers are held to the law by the
         # citation check in core/generate.py, not by a sampling parameter.

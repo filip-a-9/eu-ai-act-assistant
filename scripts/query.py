@@ -27,8 +27,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.config import load_config
 from core.embed import openai_embedder
-from core.index import open_collection
-from core.retrieve import Hit, hit_to_dict, log_query, search
+from core.index import open_bm25, open_collection
+from core.retrieve import Hit, hit_to_dict, hybrid_search, log_query
 
 SNIPPET_CHARS = 300
 
@@ -43,7 +43,12 @@ def snippet(text: str, limit: int = SNIPPET_CHARS) -> str:
 
 def render(hit: Hit, full: bool) -> str:
     body = hit.text if full else snippet(hit.text)
-    heading = f"{hit.rank:>2}  {hit.score:.3f}  {hit.article_no}"
+    # Where each retriever placed this chunk, rather than the fused score --
+    # after RRF that is about 0.03 and unreadable. "d3 b-" says dense ranked it
+    # third and BM25 never returned it, which is what this CLI is for.
+    dense = f"d{hit.dense_rank}" if hit.dense_rank is not None else "d-"
+    lexical = f"b{hit.bm25_rank}" if hit.bm25_rank is not None else "b-"
+    heading = f"{hit.rank:>2}  {dense:>5} {lexical:<5}  {hit.article_no}"
     if hit.title and hit.title != hit.article_no:
         heading += f" — {hit.title}"
 
@@ -92,8 +97,11 @@ def main() -> int:
     top_k = args.top_k if args.top_k is not None else config.top_k
 
     collection = open_collection(config.index_dir, config.scratch_dir)
+    bm25 = open_bm25(config.chunks_dir)
     embedder = openai_embedder(config.openai_api_key, config.embed_model)
-    hits = search(collection, embedder, args.question, top_k)
+    hits = hybrid_search(
+        collection, bm25, embedder, args.question, top_k, config.fusion_candidates
+    )
 
     if not args.no_log:
         log_query(args.question, hits, config.logs_dir)

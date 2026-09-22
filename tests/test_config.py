@@ -29,6 +29,7 @@ CONFIG_VARS = (
     "EMBED_MODEL",
     "CHAT_MODEL",
     "TOP_K",
+    "FUSION_CANDIDATES",
     "TEMPERATURE",
     "MAX_QUESTIONS",
     "RAW_DIR",
@@ -94,6 +95,21 @@ def test_non_numeric_temperature_fails_instead_of_silently_defaulting(isolated_e
     assert "TEMPERATURE" in str(excinfo.value)
 
 
+def test_non_numeric_fusion_candidates_fails_instead_of_silently_defaulting(
+    isolated_env,
+):
+    # How deep each retriever goes before the rankings are fused. A typo that
+    # fell back to the default would change what retrieval returns while every
+    # test and eval still passed, which is the failure this project can least
+    # afford to have be silent.
+    isolated_env.setenv("OPENAI_API_KEY", "sk-test")
+    isolated_env.setenv("FUSION_CANDIDATES", "deep")
+    with pytest.raises(RuntimeError) as excinfo:
+        load_config()
+    message = str(excinfo.value)
+    assert "FUSION_CANDIDATES" in message and "deep" in message
+
+
 def test_non_numeric_max_questions_fails_instead_of_silently_defaulting(isolated_env):
     # This one bounds spending, so a typo that fell back to the default would
     # be a silently larger bill than the deployment intended.
@@ -147,6 +163,9 @@ def test_defaults_match_the_documented_stack(isolated_env):
     assert cfg.embed_model == "text-embedding-3-small"
     assert cfg.chat_model == "gpt-5.6-terra"
     assert cfg.top_k == 5
+    # Ten times top_k: deep enough that a chunk one retriever ranks poorly can
+    # still be rescued by the other, shallow enough that fusion stays cheap.
+    assert cfg.fusion_candidates == 50
     # Not 0.0: gpt-5.6 rejects every temperature but its default with a 400.
     assert cfg.temperature == 1.0
     # The per-session question cap the Streamlit app enforces before it spends.
@@ -218,6 +237,7 @@ def test_config_carries_no_fields_beyond_the_documented_set():
         "embed_model",
         "chat_model",
         "top_k",
+        "fusion_candidates",
         "temperature",
         "max_questions",
         "max_questions_per_ip",
