@@ -25,6 +25,7 @@ from core.embed import openai_embedder
 from core.generate import Answer, link_citations, openai_generator
 from core.graph import build_graph, run_turn
 from core.index import open_bm25, open_collection
+from core.retrieve import found_by
 
 DISCLAIMER = (
     "Not legal advice. Answers are generated from the text of Regulation (EU) "
@@ -88,8 +89,11 @@ def render_answer(result: Answer) -> None:
     """
     st.markdown(link_citations(result.text, result.hits))
     if result.cited_hits:
+        # The provenance marker sits outside the link, so the link text stays
+        # the citation exactly as it would be quoted.
         sources = "\n".join(
-            f"- [{_label(hit)}]({hit.source_url})" for hit in result.cited_hits
+            f"- [{_label(hit)}]({hit.source_url}) · {found_by(hit)}"
+            for hit in result.cited_hits
         )
         st.caption("**Sources**\n\n" + sources)
 

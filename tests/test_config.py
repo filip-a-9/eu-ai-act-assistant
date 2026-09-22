@@ -32,9 +32,11 @@ CONFIG_VARS = (
     "FUSION_CANDIDATES",
     "TEMPERATURE",
     "MAX_QUESTIONS",
+    "MAX_QUESTIONS_PER_IP",
     "RAW_DIR",
     "CHUNKS_DIR",
     "INDEX_DIR",
+    "SCRATCH_DIR",
     "LOGS_DIR",
 )
 
@@ -227,6 +229,47 @@ def test_every_path_on_the_config_is_a_path_object(isolated_env):
     assert isinstance(cfg.raw_dir, Path)
     assert isinstance(cfg.chunks_dir, Path)
     assert isinstance(cfg.index_dir, Path)
+
+
+def test_every_variable_load_config_reads_is_cleared_by_the_fixture():
+    """CONFIG_VARS must list every env var ``core/config.py`` consults.
+
+    Derived from the module's source rather than restated by hand, because a
+    hand-maintained list is what failed: ``MAX_QUESTIONS_PER_IP`` and
+    ``SCRATCH_DIR`` were absent, so two tests above read whatever the shell
+    running pytest happened to export and passed or failed for reasons that
+    had nothing to do with the code.
+    """
+    import ast
+
+    source = (PROJECT_ROOT / "core" / "config.py").read_text(encoding="utf-8")
+    readers = {"_require", "_as_int", "_as_float", "_as_path", "_as_optional_path"}
+
+    consulted = set()
+    for node in ast.walk(ast.parse(source)):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        func = node.func
+        name = (
+            func.id
+            if isinstance(func, ast.Name)
+            else func.attr
+            if isinstance(func, ast.Attribute)
+            else None
+        )
+        # The helpers above, plus os.environ.get() where config reads a var
+        # directly. A non-literal first argument is the helper's own body
+        # forwarding a name it was given, which is not a variable itself.
+        if name in readers or name == "get":
+            first = node.args[0]
+            if isinstance(first, ast.Constant) and isinstance(first.value, str):
+                consulted.add(first.value)
+
+    assert consulted, "found no environment variables; the parser is wrong"
+    assert consulted <= set(CONFIG_VARS), (
+        "these variables are read by core/config.py but not cleared by the "
+        f"isolated_env fixture: {sorted(consulted - set(CONFIG_VARS))}"
+    )
 
 
 def test_config_carries_no_fields_beyond_the_documented_set():

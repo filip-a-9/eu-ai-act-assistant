@@ -20,7 +20,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from core.index import build, open_collection
-from core.retrieve import Hit, fuse, hybrid_search, log_query, search
+from core.retrieve import Hit, found_by, fuse, hybrid_search, log_query, search
 
 
 @pytest.fixture
@@ -576,3 +576,21 @@ def test_the_log_records_which_retriever_found_each_chunk(
     assert entry["bm25_ranks"][0] == 1
     assert entry["dense_ranks"][0] is None
     assert len(entry["dense_ranks"]) == len(entry["chunk_ids"])
+
+
+# ---------------------------------------------------------------------------
+# How a source reads to someone who is not debugging retrieval
+# ---------------------------------------------------------------------------
+
+
+def test_found_by_names_both_retrievers_when_both_returned_the_chunk():
+    assert found_by(fuse([_dense_hit("a", 1)], [_lexical("a", 3)], 1)[0]) == "both"
+
+
+def test_found_by_names_the_semantic_side_alone():
+    assert found_by(_dense_hit("a", 1)) == "semantic"
+
+
+def test_found_by_names_the_keyword_side_alone():
+    hit = fuse([], [_lexical("a", 1)], 1)[0]
+    assert found_by(hit) == "keyword"

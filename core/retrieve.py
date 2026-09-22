@@ -306,6 +306,19 @@ def hybrid_search(
     return fuse(dense, lexical, top_k)
 
 
+def found_by(hit: Hit) -> str:
+    """Which retriever surfaced this chunk, in words rather than ranks.
+
+    The companion to the ``[d2 b3]`` form the CLI and the eval print. Those
+    are for someone tuning retrieval; this is for someone reading an answer,
+    who wants to know a provision was matched on its wording rather than on a
+    rough similarity, and has no use for the rank it arrived at.
+    """
+    if hit.dense_rank is not None and hit.bm25_rank is not None:
+        return "both"
+    return "semantic" if hit.dense_rank is not None else "keyword"
+
+
 def log_query(
     question: str,
     hits: list[Hit],
