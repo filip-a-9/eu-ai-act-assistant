@@ -105,6 +105,20 @@ def test_non_numeric_max_questions_fails_instead_of_silently_defaulting(isolated
     assert "MAX_QUESTIONS" in message and "lots" in message
 
 
+def test_non_numeric_max_questions_per_ip_fails_instead_of_silently_defaulting(
+    isolated_env,
+):
+    # The wider of the two caps, and the one a deployment is most likely to
+    # retune, so the same argument applies: falling back to the default on a
+    # typo would spend more than the deployment asked for.
+    isolated_env.setenv("OPENAI_API_KEY", "sk-test")
+    isolated_env.setenv("MAX_QUESTIONS_PER_IP", "plenty")
+    with pytest.raises(RuntimeError) as excinfo:
+        load_config()
+    message = str(excinfo.value)
+    assert "MAX_QUESTIONS_PER_IP" in message and "plenty" in message
+
+
 # ---------------------------------------------------------------------------
 # Secret hygiene -- every query gets logged, so repr() is a leak surface
 # ---------------------------------------------------------------------------
@@ -137,6 +151,9 @@ def test_defaults_match_the_documented_stack(isolated_env):
     assert cfg.temperature == 1.0
     # The per-session question cap the Streamlit app enforces before it spends.
     assert cfg.max_questions == 10
+    # Three sessions' worth: wide enough that an office or a mobile carrier
+    # behind one address is not locked out by its first visitor.
+    assert cfg.max_questions_per_ip == 30
 
 
 def test_relative_paths_anchor_to_the_repo_root_not_the_working_directory(
@@ -203,6 +220,7 @@ def test_config_carries_no_fields_beyond_the_documented_set():
         "top_k",
         "temperature",
         "max_questions",
+        "max_questions_per_ip",
         "raw_dir",
         "chunks_dir",
         "index_dir",

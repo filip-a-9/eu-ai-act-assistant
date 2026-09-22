@@ -74,6 +74,7 @@ class Config:
     top_k: int
     temperature: float
     max_questions: int
+    max_questions_per_ip: int
     raw_dir: Path
     chunks_dir: Path
     index_dir: Path
@@ -122,6 +123,13 @@ def load_config() -> Config:
         # deployment needs to change is the one thing it must not have to edit
         # code to change.
         max_questions=_as_int("MAX_QUESTIONS", "10"),
+        # The same bound across sessions from one address, so that reloading
+        # the page stops being a way around the line above. Three sessions'
+        # worth rather than one: an office or a mobile carrier reaches the app
+        # from a single address, and capping that at 10 would lock out everyone
+        # behind the first visitor. Not a security control -- the address comes
+        # from the connection and can be spoofed.
+        max_questions_per_ip=_as_int("MAX_QUESTIONS_PER_IP", "30"),
         raw_dir=_as_path("RAW_DIR", "data/raw"),
         chunks_dir=_as_path("CHUNKS_DIR", "data/chunks"),
         index_dir=_as_path("INDEX_DIR", "data/index"),

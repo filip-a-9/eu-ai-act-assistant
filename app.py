@@ -63,6 +63,19 @@ def _assistant():
     return config, graph
 
 
+@st.cache_resource
+def _ip_spend() -> dict[str, int]:
+    """Questions asked per client address, shared by every session here.
+
+    ``cache_resource`` rather than a module global: it is the one thing
+    Streamlit hands back unchanged across reruns *and* across sessions, which
+    is exactly the scope a cap spanning reloads needs. Process memory, so a
+    restart clears it -- this bounds one impatient visitor, not the bill. The
+    OpenAI account's own limit does that.
+    """
+    return {}
+
+
 def render_answer(result: Answer) -> None:
     """One answer: the prose with its citations linked, then its sources.
 
@@ -102,19 +115,33 @@ except RuntimeError as exc:
     st.error(str(exc))
     st.stop()
 
-# Two separate counters on purpose. ``turns`` is the conversation, which the
-# visitor may clear; ``asked`` is what has been spent, which they may not. A
-# cap that a button resets is not a cap.
+# Three counters, and none of them is interchangeable with another. ``turns``
+# is the conversation, which the visitor may clear. ``asked`` is what this
+# session has spent, which they may not: a cap a button resets is not a cap.
+# ``spent`` is what this address has spent across sessions, because otherwise
+# reloading the page is itself the button that resets ``asked``.
 if "turns" not in st.session_state:
     st.session_state.turns = []
 if "asked" not in st.session_state:
     st.session_state.asked = 0
 
 turns: list[tuple[str, Answer]] = st.session_state.turns
-at_cap = st.session_state.asked >= config.max_questions
+# None on localhost, so development is bounded by the session cap alone. The
+# address comes from the connection and can be spoofed; this raises the effort
+# of a reset from a keypress to a new address, and claims nothing more.
+caller = st.context.ip_address or "local"
+spent = _ip_spend()
+at_session_cap = st.session_state.asked >= config.max_questions
+at_ip_cap = spent.get(caller, 0) >= config.max_questions_per_ip
+at_cap = at_session_cap or at_ip_cap
 
 status, reset = st.columns([4, 1], vertical_alignment="center")
-status.caption(f"{st.session_state.asked} of {config.max_questions} questions")
+# Whichever bound is actually binding, so a fresh session that is already out
+# of questions does not read "0 of 10" beside a notice saying it is finished.
+if at_ip_cap:
+    status.caption(f"{spent.get(caller, 0)} of {config.max_questions_per_ip} questions")
+else:
+    status.caption(f"{st.session_state.asked} of {config.max_questions} questions")
 if reset.button("New conversation", disabled=not turns):
     st.session_state.turns = []
     st.rerun()
@@ -133,7 +160,15 @@ for question, result in turns:
     with st.chat_message("assistant"):
         render_answer(result)
 
-if at_cap:
+# The two caps need different words: telling someone to reload is the fix for
+# one and a waste of their time for the other.
+if at_ip_cap:
+    st.info(
+        f"This demo answers {config.max_questions_per_ip} questions per "
+        "visitor, because each one calls a paid model. Reloading will not "
+        "reset this one -- please come back another time."
+    )
+elif at_session_cap:
     st.info(
         f"This demo answers {config.max_questions} questions per session, "
         "because each one calls a paid model. Reload the page to start over."
@@ -161,6 +196,7 @@ if question and not at_cap:
     if result is not None:
         st.session_state.turns.append((question, result))
         st.session_state.asked += 1
+        spent[caller] = spent.get(caller, 0) + 1
         # Rerun so the counter, the cap and the starters all reflect the turn
         # that just landed; the answer is already in session_state, so this
         # repaints from memory rather than asking anything again.

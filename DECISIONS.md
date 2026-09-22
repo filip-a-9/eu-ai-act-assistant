@@ -887,3 +887,49 @@ Recall plateaus at 0.92 by k=10 and does not improve through k=20.
   carrying no information under either metric. Recorded because it could be
   mistaken for tuning the gold: it was not needed for the number, since the
   areas in fact take ranks 2, 4 and 5 on that question.
+
+## Phase 9 — a per-address cap beside the per-session one (2026-09-22)
+
+### The problem
+
+- **`MAX_QUESTIONS` was never a bound on anything** — `asked` lives in
+  `st.session_state`, so reloading the page issued a fresh ten, and the at-cap
+  notice told the visitor to do exactly that. It discouraged a long sitting and
+  nothing else.
+
+### The change
+
+- **A second cap keyed on `st.context.ip_address`, held in a
+  `@st.cache_resource` dict** — that decorator is the only object Streamlit
+  hands back unchanged across sessions, which is the scope a cap spanning
+  reloads needs. `MAX_QUESTIONS_PER_IP`, default 30.
+- **Three sessions' worth rather than one** — an office, a university and a
+  mobile carrier each reach the app from a single address. At 10 the first
+  visitor would lock out every colleague behind them, which costs more in a
+  portfolio demo than the spending it would save.
+- **`None` on localhost falls back to the key `"local"`** — so development is
+  bounded by the session cap alone and the dict still has a well-defined key.
+- **The caption shows whichever bound is binding** — a fresh session that is
+  already out of questions would otherwise read "0 of 10" beside a notice
+  saying it is finished.
+- **The two caps say different things when reached** — "reload to start over"
+  is the fix for one and a waste of the visitor's time for the other.
+
+### What this is not
+
+- **Not a security control, and the code says so** — the address is taken from
+  the connection and can be spoofed; Streamlit's own docstring for
+  `ip_address` says not to rely on it. It raises the cost of a reset from a
+  keypress to a new address. The bill is bounded by the spending limit on the
+  OpenAI account, which is where that guarantee belongs.
+- **Not durable** — the dict is process memory, cleared by any restart, and a
+  host that sleeps an idle app clears it on every wake. Persisting it means
+  SQLite, which buys little once the account limit is the real ceiling.
+
+### Testing
+
+- **The config field is covered; the arithmetic in `app.py` is not** — `tests/`
+  mirrors `core/` one module per unit and `app.py` has none. Extracting six
+  lines of counting into `core/` to make them testable was declined as more
+  structure than the logic earns; recorded so the gap is a decision rather
+  than an oversight.
