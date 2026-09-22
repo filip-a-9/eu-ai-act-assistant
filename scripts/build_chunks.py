@@ -32,7 +32,7 @@ from core.config import chunks_dir, raw_dir
 # Asserted so that a future re-fetch which changes EUR-Lex's markup fails here,
 # loudly, instead of silently producing a smaller and worse corpus. Changing
 # the chunker legitimately changes this number -- edit it in the same commit.
-EXPECTED_CHUNKS = 886
+EXPECTED_CHUNKS = 901
 
 # Articles 105-107, 109 and 110 amend other instruments by quoting the text
 # they insert, so their markers carry the *other* instrument's numbering
@@ -48,8 +48,9 @@ KNOWN_QUOTED_INSERTIONS = [
 ]
 
 # The embedding model's ceiling is 8,191 tokens. Roughly four characters per
-# token leaves the largest chunk (Annex III) with ample headroom, but the check
-# is cheap and a silent truncation at index time would not be.
+# token leaves the largest chunk (Article 5(1), 5,406 characters, since Annex
+# III now splits at its areas) with ample headroom, but the check is cheap and
+# a silent truncation at index time would not be.
 EMBED_CHAR_CEILING = 8191 * 4
 
 

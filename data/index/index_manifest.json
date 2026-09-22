@@ -1,8 +1,8 @@
 {
   "collection": "ai_act",
   "embed_model": "text-embedding-3-small",
-  "chunk_count": 886,
-  "built_at": "2026-09-19T21:20:24+00:00",
+  "chunk_count": 901,
+  "built_at": "2026-09-22T16:03:33+00:00",
   "chunks_file": "chunks.jsonl",
-  "chunks_sha256": "a16531ef14aa2e14a2698d8f7c30ee8be8e8e9875147dde4d243c847eec73762"
+  "chunks_sha256": "bad91af2e8fdbbb215656a4fea3428a7a98c8fdf700d431ac9c1c39b13a88fb5"
 }

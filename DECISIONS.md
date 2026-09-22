@@ -787,3 +787,103 @@ Recall plateaus at 0.92 by k=10 and does not improve through k=20.
   21 questions, and the strict-miss list above is the evidence it needs; making
   the call in the same step that produced the evidence would have meant tuning
   the gold to the number.
+
+## Phase 8 — splitting Annex III at its areas (2026-09-22)
+
+### The problem
+
+- **Annex III was one 7,291-character chunk holding eight unrelated domains** —
+  biometrics, critical infrastructure, education, employment, essential
+  services, law enforcement, migration, justice. One vector averaged over eight
+  domains matched none of them: on "What makes an AI system high-risk?" it
+  scored cosine **0.528 and was absent from the top 50**, against 0.679 for the
+  top hit. It was not narrowly missing the cut.
+
+### Rejected, with measurements: stripping the chapter line from `embed_text`
+
+- **Re-embedding nine candidate chunks without the `Chapter III — HIGH-RISK AI
+  SYSTEMS` clause made retrieval worse, not better** — `art_9.para_6` +0.019,
+  `art_15.para_4` +0.023, `art_9.para_3` +0.026, while `art_6.para_2` lost
+  0.004 and fell out of the top five and Annex III did not move at all. The
+  header was never the problem; recorded so the idea is not re-derived.
+
+### The change
+
+- **An annex with no Section headings now splits at its numbered areas** — the
+  same rule an article with no paragraph level already follows. The areas are
+  flattened inline in the chunk text, so the split is driven by the
+  `grid-container grid-list` element structure the article-points path already
+  walks, not by a regex over text.
+- **The chapeau rides on every area** — without "High-risk AI systems pursuant
+  to Article 6(2) are the AI systems listed in any of the following areas:",
+  area 4 reads as a neutral description of employment software. Identical to
+  the Article 5(1)(a) reasoning in Phase 1.
+- **Labels are `Annex III, point 4`, matching how the Act cites itself** — the
+  consolidated text says "point 1 of Annex III" twelve times. Checked against
+  `_SUBDIVISION` in `core/generate.py`: the label is reachable from a cited
+  "Annex III" via the `,` boundary, and "Annex I" does **not** falsely match
+  "Annex III, point 4" because the remainder opens with `I` rather than `(`
+  or `,`.
+
+### The size threshold, which the spec did not call for
+
+- **The split is gated on the annex exceeding 2,500 characters** — the spec
+  scoped this to "Annex III and Annex IV, the whole population", but the rule as
+  written ("split when it has no Section headings") also catches Annexes V, IX,
+  XII and XIII. Measured, the section-less annexes fall into two groups with
+  nothing between them: III at 7,291 and IV at 5,711, against V at 1,385, XIII
+  at 1,390, XII at 1,321, II at 779 and IX at 719. Splitting the second group
+  would produce the sub-200-character fragments Phase 1 rejected for Annex II.
+- **No structural discriminator exists, so the threshold is on size** — the
+  obvious candidate, "areas that carry their own sub-points", fails both ways:
+  seven of Annex IV's nine areas have none, and the small Annex XII has them.
+- **This is not fixed-size chunking** — the threshold decides how deep to
+  descend, never where to cut. The boundary is still the numbered area, exactly
+  as Phase 1's "recursion stops at the paragraph" was a decision about depth.
+
+### Result
+
+- **886 chunks to 901** — Annex III 1 to 8, Annex IV 1 to 9. The largest chunk
+  in the corpus is now **Article 5(1) at 5,406 characters**, down from Annex
+  III's 7,291.
+- **Annex III is retrieved where it never was** — on "What makes an AI system
+  high-risk?", `anx_III.point_2` now ranks **4th at 0.66**, against the whole
+  annex's 0.528 and rank >50. On "When is an AI system high-risk because it
+  appears in Annex III?", three areas take ranks 2, 4 and 5. On the job-sifting
+  question `anx_III.point_4` ranks **1st**.
+
+| recall@5 | before | after |
+|---|---|---|
+| any expected chunk | 0.83 | **0.86** |
+| all expected chunks | 0.61 | **0.64** |
+| MRR@5 | 0.650 | **0.678** |
+| lay group, any | 0.25 | **0.38** |
+
+    k    any    all    MRR
+    1    0.56   0.25   0.556
+    3    0.78   0.47   0.657
+    5    0.86   0.64   0.678
+    10   0.92   0.75   0.686
+    20   0.92   0.81   0.686
+
+- **Necessary but not sufficient, as predicted** — asked "What makes an AI
+  system high-risk?", the app now reaches Annex III and cites `Annex III,
+  point 2` instead of Article 6(2) alone, but still names one domain of eight.
+  Articles 9 and 15 discuss high-risk systems at length and outrank the
+  provisions that define them, which is the ranking problem, not a chunking
+  one, and it remains open.
+- **`lay-face-recognition-shop` still misses** — `anx_III.point_1` moved to
+  rank 34 at 0.34 but is not in the top five, so the biometrics area is found
+  and not surfaced.
+
+### Gold updated for the new ids
+
+- **`lay-cv-screening` expects `anx_III.point_4` and
+  `lay-face-recognition-shop` expects `anx_III.point_1`** — naming the
+  employment and biometrics areas is a sharper check than the whole annex was.
+- **`high-risk-annex-iii` now expects `art_6.para_2` alone** — the question
+  names no domain, so no area is a better landing point than any other, and
+  listing all eight would make it a loose hit and a strict miss permanently,
+  carrying no information under either metric. Recorded because it could be
+  mistaken for tuning the gold: it was not needed for the number, since the
+  areas in fact take ranks 2, 4 and 5 on that question.

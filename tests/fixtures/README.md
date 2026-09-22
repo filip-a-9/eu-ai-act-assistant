@@ -24,7 +24,8 @@ including the `cpt_III.sct_1` section divs that share the `cpt_` id prefix.
 | `article_75b_nbsp_heading.html` | `art_75b` | heading is `Article 75b` — one of seven headings using a non-breaking space, all inserted by the 2026 amendment |
 | `article_105_lead_then_paragraph.html` | `art_105` | amends another directive by quoting the inserted text, so its marker is `‘5.` and belongs to Directive 2014/90/EU, not to Article 105 |
 | `annex_01_sections.html` | `anx_I` | two `Section A.`/`Section B.` headings; Section A opens with a `▼M1 —————` repealed entry |
-| `annex_03_whole.html` | `anx_III` | no section headings, stays whole. **Trimmed to the first 3 of 8** high-risk areas |
+| `annex_03_areas.html` | `anx_III` | no section headings and long enough to split at its numbered areas. **Untrimmed**, because the eight areas are eight distinct domains rather than repetition, and each is now its own chunk |
+| `annex_09_short_points.html` | `anx_IX` | no section headings and numbered points, but only 719 characters, so it stays whole — the counter-case that keeps the split from reaching every annex |
 | `annex_11_heading_pair.html` | `anx_XI` | writes `Section 1` in one heading tag and the real title in the next; unpaired this yields two 9-character chunks |
 | `annex_14_nbsp_heading.html` | `anx_XIV` | heading is `ANNEX XIV`, and it has no `title-annex-2` subtitle |
 | `recitals_oj.html` | `rct_1`, `rct_12`, `rct_53` | from the **as-published** document, whose class names share nothing with the consolidated text; the recital number sits in its own table cell |

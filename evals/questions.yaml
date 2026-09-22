@@ -43,8 +43,14 @@
 
 - id: high-risk-annex-iii
   question: When is an AI system high-risk because it appears in Annex III?
-  expect: [art_6.para_2, anx_III]
-  article_no: Article 6(2) / Annex III
+  expect: [art_6.para_2]
+  article_no: Article 6(2)
+  note: >
+    Expected Annex III as a whole until it was split into its eight areas.
+    The question names no domain, so no single area is a better landing point
+    than any other, and listing all eight would make this a loose hit and a
+    strict miss forever -- an entry carrying no information under either
+    metric. The two lay questions below name a domain and carry that check.
 
 - id: high-risk-derogation
   question: Can a provider argue that an Annex III system is not actually high-risk?
@@ -195,17 +201,23 @@
 - id: lay-cv-screening
   group: lay
   question: Can my company use AI to sift job applications and rank candidates?
-  expect: [anx_III, art_6.para_2]
-  article_no: Annex III / Article 6(2)
+  expect: [anx_III.point_4, art_6.para_2]
+  article_no: Annex III, point 4 / Article 6(2)
   note: >
     Requires connecting "sifting job applications" to employment being an
-    Annex III area. Nothing in the question says "high-risk".
+    Annex III area. Nothing in the question says "high-risk". Point 4 is the
+    employment area specifically, which is a sharper check than the whole
+    annex was.
 
 - id: lay-face-recognition-shop
   group: lay
   question: We want cameras that recognise faces in our shop. Is that allowed?
-  expect: [art_5.para_1, art_5.para_2, anx_III]
-  article_no: Article 5(1)-(2) / Annex III
+  expect: [art_5.para_1, art_5.para_2, anx_III.point_1]
+  article_no: Article 5(1)-(2) / Annex III, point 1
+  note: >
+    Point 1 is the biometrics area. Article 5 bans real-time remote biometric
+    identification in public; the Annex III area is what makes the permitted
+    remainder high-risk rather than free.
 
 - id: lay-marketing-copy
   group: lay

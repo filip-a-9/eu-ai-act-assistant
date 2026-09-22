@@ -9,7 +9,9 @@ Granularity is structural, never fixed-size:
 * an article splits at its own numbered paragraphs;
 * an article with no paragraph level splits at its lettered or numbered points;
 * an article with neither stays whole;
-* an annex splits at its Section headings, or stays whole if it has none;
+* an annex splits at its Section headings;
+* an annex with no Section headings splits at its numbered areas when it is too
+  long for one vector, and otherwise stays whole;
 * a recital is always one chunk.
 
 Nothing here touches the network or reads ``data/raw`` directly; callers pass
@@ -48,6 +50,16 @@ _SUBDIVISION_LABEL = re.compile(r"[0-9]+[a-z]*|[a-z]{1,2}")
 
 _ARTICLE_SKIP = {"title-article-norm", "eli-title", "modref"}
 _ANNEX_SKIP = {"title-annex-1", "title-annex-2", "separator-annex", "modref"}
+
+# An annex with no Section headings descends to its numbered areas only when it
+# is too long for one vector to represent. Measured over the fourteen annexes,
+# the section-less ones fall in two groups with nothing between them: Annex III
+# at 7,291 characters and Annex IV at 5,711, against Annex V at 1,385, XIII at
+# 1,390, XII at 1,321, II at 779 and IX at 719. Splitting the second group would
+# produce the sub-200-character fragments Phase 1 rejected for Annex II. The
+# threshold chooses how deep to descend, never where to cut -- the boundary is
+# still the area, so this stays structural chunking.
+_ANNEX_SPLIT_MIN_CHARS = 2_500
 
 
 @dataclass(frozen=True)
@@ -367,6 +379,34 @@ def _annex_chunks(annex: Tag, canonical: str) -> list[Chunk]:
     boundaries = _section_boundaries(children)
 
     if not boundaries:
+        whole = _text_of(children)
+        areas = [
+            (index, label, child)
+            for index, child in enumerate(children)
+            if "grid-container" in _classes(child) and (label := _point_label(child))
+        ]
+        if len(areas) > 1 and len(whole) > _ANNEX_SPLIT_MIN_CHARS:
+            # The chapeau rides on every area, for the reason it rides on every
+            # lettered point of an article: without "High-risk AI systems
+            # pursuant to Article 6(2) are ...", area 4 reads as a neutral
+            # description of employment software rather than as the list that
+            # makes it high-risk.
+            chapeau = _text_of(children[: areas[0][0]])
+            return [
+                _build(
+                    id=f"{anx_id}.point_{label}",
+                    kind="annex",
+                    article_no=f"Annex {number}, point {label}",
+                    number=number,
+                    paragraph=f"point {label}",
+                    parent_id=anx_id,
+                    title=annex_title,
+                    chapter="",
+                    source_url=url,
+                    text=f"{chapeau} {_text_of([node])}".strip(),
+                )
+                for _, label, node in areas
+            ]
         return [
             _build(
                 id=anx_id,
@@ -378,7 +418,7 @@ def _annex_chunks(annex: Tag, canonical: str) -> list[Chunk]:
                 title=annex_title,
                 chapter="",
                 source_url=url,
-                text=_text_of(children),
+                text=whole,
             )
         ]
 

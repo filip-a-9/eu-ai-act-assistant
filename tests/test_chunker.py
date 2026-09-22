@@ -179,10 +179,40 @@ def test_annex_with_sections_splits_at_them(fixture_html):
     ]
 
 
-def test_annex_without_sections_stays_whole(fixture_html):
-    chunks = parse_consolidated(fixture_html("annex_03_whole.html"))
+def test_a_short_annex_without_sections_stays_whole(fixture_html):
+    # Annex IX is 719 characters across five numbered points. Splitting it
+    # would yield five ~140-character chunks, which is the Annex II failure
+    # mode Phase 1 already rejected.
+    chunks = parse_consolidated(fixture_html("annex_09_short_points.html"))
     assert len(chunks) == 1
-    assert chunks[0].article_no == "Annex III"
+    assert chunks[0].article_no == "Annex IX"
+
+
+def test_a_long_annex_without_sections_splits_at_its_numbered_areas(fixture_html):
+    # Annex III is 7,291 characters holding eight unrelated domains, so one
+    # vector averaged over all of them matches none of them.
+    chunks = parse_consolidated(fixture_html("annex_03_areas.html"))
+    assert [c.id for c in chunks] == [f"anx_III.point_{n}" for n in range(1, 9)]
+
+
+def test_every_annex_area_inherits_the_chapeau(fixture_html):
+    # Without "High-risk AI systems pursuant to Article 6(2) are ...", area 4
+    # reads as a neutral description of employment software with nothing
+    # marking it high-risk -- the Article 5(1)(a) failure from Phase 1.
+    chunks = parse_consolidated(fixture_html("annex_03_areas.html"))
+    employment = next(c for c in chunks if c.paragraph == "point 4")
+    assert employment.text.startswith("High-risk AI systems pursuant to Article 6(2)")
+    assert "Employment, workers" in employment.text
+
+
+def test_annex_area_chunks_are_individually_citable(fixture_html):
+    # A missing citation is a KeyError at answer time, because Chroma drops
+    # metadata keys whose value is None.
+    chunks = parse_consolidated(fixture_html("annex_03_areas.html"))
+    labels = [c.article_no for c in chunks]
+    assert labels == [f"Annex III, point {n}" for n in range(1, 9)]
+    assert len(set(labels)) == len(labels)
+    assert all(c.parent_id == "anx_III" for c in chunks)
 
 
 def test_annex_xi_pairs_its_split_section_headings(fixture_html):
@@ -235,7 +265,8 @@ CONSOLIDATED_FIXTURES = [
     "article_75b_nbsp_heading.html",
     "article_105_lead_then_paragraph.html",
     "annex_01_sections.html",
-    "annex_03_whole.html",
+    "annex_03_areas.html",
+    "annex_09_short_points.html",
     "annex_11_heading_pair.html",
     "annex_14_nbsp_heading.html",
 ]
@@ -261,7 +292,12 @@ def test_every_chunk_carries_a_citation_label(every_chunk):
 def test_subdivision_labels_are_well_formed(every_chunk):
     # A malformed label means a citation nobody can look up. Quoted insertions
     # in the amendment articles are the way this goes wrong in practice.
-    allowed = re.compile(r"|[0-9]+[a-z]*|[a-z]{1,2}|Section \S+")
+    # "point 4" joins the whitelist for the numbered areas of a long annex; it
+    # is held to the same narrow label shape as an article's subdivisions
+    # rather than to `Section`'s looser one.
+    allowed = re.compile(
+        r"|[0-9]+[a-z]*|[a-z]{1,2}|Section \S+|point (?:[0-9]+[a-z]*|[a-z]{1,2})"
+    )
     bad = [
         (c.id, c.paragraph) for c in every_chunk if not allowed.fullmatch(c.paragraph)
     ]
