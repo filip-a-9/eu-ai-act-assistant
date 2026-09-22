@@ -719,3 +719,71 @@ Recall plateaus at 0.92 by k=10 and does not improve through k=20.
   write, and that failure attaches itself to whichever test runs next.
 - **recall@5 unchanged at 0.83**, and `git status data/index/` is now empty
   immediately after a full eval run, which is the check that says it worked.
+
+## Phase 7 — a strict recall number beside the loose one (2026-09-22)
+
+### The problem
+
+- **`recall@k` scored a question as a clean hit on one expected chunk out of
+  four** — `Result.gold_rank` returns the rank of the *first* expected chunk,
+  so `recall_at` asked whether retrieval found anything rather than whether it
+  found what the question needs. 21 of 36 questions expect more than one chunk
+  (11 expect two, 8 three, 2 four), so this covered most of the set.
+- **Measured on the eval's own `high-risk-annex-iii`** — a question that names
+  Annex III in its text — `anx_III` was absent from the top *fifty* and the
+  question still scored 1.00, carried entirely by `art_6.para_2` at rank 1.
+
+### The change
+
+- **`covered_at(k)` and `recall_all()` added beside `recall_at(k)` and
+  `recall()`, both reported** — the loose number is not replaced, because every
+  earlier measurement in this file is quoted in it and a metric you can no
+  longer compare against is a metric you have lost. Confirmed unchanged at
+  **0.83**, which is the guard that the change touched only what it should.
+- **`missing_at(k)` prints the expected ids that did not come back** — the
+  actionable output. An aggregate says retrieval is worse than it looked; this
+  says which provision the answer cannot cite.
+- **`MRR` left on `gold_rank`** — mean reciprocal rank of a *set* is a
+  different measure, and inventing one here would be scope creep.
+- **No pytest tests** — `evals/` asserts whole-corpus facts inside the scripts
+  by standing decision, since `pytest -q` must pass on a fresh clone with no
+  corpus and no API key. This is why the change was kept small enough to read.
+
+### The new baseline
+
+    k      any    all    MRR
+    1      0.53   0.22   0.528
+    3      0.75   0.44   0.630
+    5      0.83   0.61   0.650
+    10     0.92   0.72   0.662
+    20     0.92   0.78   0.662
+
+    group        n   any@5  all@5
+    lay          8   0.25   0.00
+    statutory    28  1.00   0.79
+
+- **The lay group scores 0.00 strict at k = 5** — not one of the eight
+  lay-phrased questions retrieves its full expected set. The loose 0.25 was
+  three questions each carried by a single chunk.
+- **Eight questions are a hit under `any` and a miss under `all` at k = 5** —
+  `provider-vs-deployer` (missing `art_3.point_3`), `high-risk-annex-iii`
+  (`anx_III`), `high-risk-derogation` (`art_6.para_3`), `provider-obligations`
+  (`art_16.point_c`), `regulatory-sandbox` (`art_57.para_1`, `art_57.para_9`),
+  `why-emotion-recognition-restricted` (`art_5.para_1`),
+  `lay-face-recognition-shop` (`anx_III`), `lay-startup-fines`
+  (`art_99.para_6a`).
+- **Five of those survive to k = 20, so they are not a `top_k` problem** —
+  `high-risk-annex-iii` and `lay-face-recognition-shop` (both `anx_III`),
+  `lay-cv-screening` (`art_6.para_2`), `lay-consequences` (`art_99.para_1`),
+  `lay-deadline` (three of the four `art_113` points). `anx_III` does enter the
+  top 20 for `lay-cv-screening`, and for no other question that expects it.
+
+### `questions.yaml` deliberately left unchanged
+
+- **The `expect` lists were not re-read as conjunctions or alternatives in this
+  step** — the file's header calls them alternatives, and for some entries that
+  is plainly right, while `application-dates` wants all four `art_113` points
+  and a complete answer needs each. Deciding which is which is a judgement over
+  21 questions, and the strict-miss list above is the evidence it needs; making
+  the call in the same step that produced the evidence would have meant tuning
+  the gold to the number.

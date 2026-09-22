@@ -61,8 +61,29 @@ class Result:
         return None
 
     def recall_at(self, k: int) -> bool:
+        """True when *any* expected chunk is at or above rank ``k``."""
         rank = self.gold_rank
         return rank is not None and rank <= k
+
+    def missing_at(self, k: int) -> list[str]:
+        """Expected chunks absent from the top ``k``, in the order declared.
+
+        This is the actionable output of the whole script. An aggregate says
+        retrieval is worse than it looked; this says which provision is the
+        one nobody is being shown.
+        """
+        found = {hit.id for hit in self.hits if hit.rank <= k}
+        return [chunk_id for chunk_id in self.question.expect if chunk_id not in found]
+
+    def covered_at(self, k: int) -> bool:
+        """True when *every* expected chunk is at or above rank ``k``.
+
+        The strict counterpart to ``recall_at``. A question expecting four
+        chunks scores a full hit under ``recall_at`` on one of them, which is
+        how Annex III stayed absent from the top fifty while the question that
+        names it scored 1.00.
+        """
+        return not self.missing_at(k)
 
 
 def load_questions() -> list[Question]:
@@ -112,7 +133,18 @@ def run(questions: list[Question], collection, embedder, top_k: int) -> list[Res
 
 
 def recall(results: list[Result], k: int) -> float:
+    """Fraction of questions with at least one expected chunk in the top k."""
     return sum(result.recall_at(k) for result in results) / len(results)
+
+
+def recall_all(results: list[Result], k: int) -> float:
+    """Fraction of questions with *every* expected chunk in the top k.
+
+    Reported beside ``recall`` rather than replacing it: every earlier number
+    in DECISIONS.md is quoted in the loose metric, and a measurement you can
+    no longer compare against is a measurement you have lost.
+    """
+    return sum(result.covered_at(k) for result in results) / len(results)
 
 
 def mrr(results: list[Result], k: int) -> float:
@@ -134,9 +166,12 @@ def report(results: list[Result], top_k: int) -> None:
     print(f"questions  {len(results)}")
     print(f"retrieved  top {top_k}")
     print()
+    print("recall     any    all")
     for k in sorted({1, 3, top_k}):
-        print(f"recall@{k:<4} {recall(results, k):.2f}")
-    print(f"MRR@{top_k:<7} {mrr(results, top_k):.3f}")
+        print(f"  @{k:<7}{recall(results, k):.2f}   {recall_all(results, k):.2f}")
+    print("  any = at least one expected chunk retrieved")
+    print("  all = every expected chunk retrieved")
+    print(f"\nMRR@{top_k:<7} {mrr(results, top_k):.3f}")
 
     # Split by how the question is phrased. The headline number averages two
     # very different populations: questions using the Act's own vocabulary
@@ -145,44 +180,65 @@ def report(results: list[Result], top_k: int) -> None:
     # entirely a question about the lay group.
     groups = sorted({result.question.group for result in results})
     if len(groups) > 1:
-        print(f"\ngroup        n   recall@{top_k}  MRR@{top_k}")
+        print(f"\ngroup        n   any@{top_k}  all@{top_k}  MRR@{top_k}")
         for group in groups:
             subset = [r for r in results if r.question.group == group]
             print(
                 f"{group:<12} {len(subset):<3} {recall(subset, top_k):.2f}"
-                f"      {mrr(subset, top_k):.3f}"
+                f"   {recall_all(subset, top_k):.2f}   {mrr(subset, top_k):.3f}"
             )
 
     misses = [result for result in results if not result.recall_at(top_k)]
     if not misses:
         print("\nno misses")
+    else:
+        # Misses are printed with what came back instead, because an aggregate
+        # number tells you retrieval got worse and nothing about where to look.
+        print(f"\n{len(misses)} miss{'es' if len(misses) != 1 else ''}:")
+        for result in misses:
+            print(f"\n  {result.question.id}")
+            print(f"    asked     {result.question.question}")
+            print(f"    wanted    {', '.join(result.question.expect)}")
+            got = ", ".join(f"{hit.id} ({hit.score:.2f})" for hit in result.hits[:5])
+            print(f"    got       {got or '(nothing)'}")
+
+        # A gold chunk sitting just outside the cut is a different problem from
+        # one retrieval cannot find at all: the first is a k or a re-ranking
+        # question, the second is an embedding question.
+        deep = [r for r in misses if r.gold_rank is not None]
+        if deep:
+            print(
+                f"\n  {len(deep)} of those did retrieve a gold chunk, below the cut: "
+                + ", ".join(f"{r.question.id}@{r.gold_rank}" for r in deep)
+            )
+
+    # Questions the loose metric calls a hit and the strict one a miss. These
+    # are invisible in every number above and are the reason the strict metric
+    # exists: whatever is listed here is a provision the answer cannot cite
+    # because it was never retrieved.
+    partial = [
+        result
+        for result in results
+        if result.recall_at(top_k) and not result.covered_at(top_k)
+    ]
+    if not partial:
         return
-
-    # Misses are printed with what came back instead, because an aggregate
-    # number tells you retrieval got worse and nothing about where to look.
-    print(f"\n{len(misses)} miss{'es' if len(misses) != 1 else ''}:")
-    for result in misses:
-        print(f"\n  {result.question.id}")
-        print(f"    asked     {result.question.question}")
-        print(f"    wanted    {', '.join(result.question.expect)}")
-        got = ", ".join(f"{hit.id} ({hit.score:.2f})" for hit in result.hits[:5])
-        print(f"    got       {got or '(nothing)'}")
-
-    # A gold chunk sitting just outside the cut is a different problem from one
-    # retrieval cannot find at all: the first is a k or a re-ranking question,
-    # the second is an embedding question.
-    deep = [r for r in misses if r.gold_rank is not None]
-    if deep:
+    print(f"\n{len(partial)} partial (hit under any, miss under all):")
+    for result in partial:
+        found = len(result.question.expect) - len(result.missing_at(top_k))
         print(
-            f"\n  {len(deep)} of those did retrieve a gold chunk, below the cut: "
-            + ", ".join(f"{r.question.id}@{r.gold_rank}" for r in deep)
+            f"  {result.question.id:<34} {found}/{len(result.question.expect)}"
+            f"  not retrieved: {', '.join(result.missing_at(top_k))}"
         )
 
 
 def sweep(results_by_k: dict[int, list[Result]]) -> None:
-    print("\nk    recall   MRR")
+    print("\nk    any    all    MRR")
     for k, results in sorted(results_by_k.items()):
-        print(f"{k:<5}{recall(results, k):.2f}     {mrr(results, k):.3f}")
+        print(
+            f"{k:<5}{recall(results, k):.2f}   {recall_all(results, k):.2f}"
+            f"   {mrr(results, k):.3f}"
+        )
 
 
 def main() -> int:
