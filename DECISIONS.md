@@ -1164,9 +1164,10 @@ spend, and a false refusal of a real question counts as the former.
   what the model wrote** — every refusal reads the same; the log has to tell a
   model declining from a fabricated citation, and show what a caught jailbreak
   said. The draft goes to the log only, never the UI.
-- **Measured live on the 36 eval questions: no false refusals** — 28
-  answered, 8 declined by the model (`no_citation`), 0 caught by the sentence
-  or length rule.
+- **Measured live on the 36 eval questions: no false refusals** — run once
+  per splitter. First: 28 answered, 8 declined by the model (`no_citation`).
+  Final splitter: 29 and 7. Neither run had an answer caught by the sentence or
+  length rule; the one-question shift is temperature 1.0, not the splitter.
 
 ### The relevance floor
 
@@ -1215,6 +1216,5 @@ spend, and a false refusal of a real question counts as the former.
   line whose timestamp cannot be read is kept rather than deleted.
 
 recall@5 unchanged at 0.58 / 0.39, MRR 0.490: ranking was not touched. 187
-tests to 245, each watched red first or broken on purpose to prove it canfail. The live 36-question check ran against the first splitter and was not
-repeated after the second, which breaks at lowercase and quoted sentence
-starts the first one let through.
+tests to 245, each watched red first or broken on purpose to prove it can
+fail.
