@@ -40,7 +40,7 @@ DISCLAIMER = (
 # assistant is actually built to do, and a visitor who only ever asks answerable
 # questions never sees it.
 EXAMPLES = (
-    "Which AI practices are prohibited?",
+    "Do I have to tell customers they are talking to a chatbot?",
     "What makes an AI system high-risk?",
     "What does the GDPR say about consent?",
 )
