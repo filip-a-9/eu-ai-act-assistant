@@ -98,7 +98,9 @@ def main() -> int:
         ),
         top_k=args.top_k if args.top_k is not None else config.top_k,
         fusion_candidates=config.fusion_candidates,
+        min_dense_score=config.min_dense_score,
         logs_dir=config.logs_dir,
+        log_retention_days=config.log_retention_days,
     )
 
     if args.question:

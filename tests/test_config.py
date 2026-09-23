@@ -33,6 +33,9 @@ CONFIG_VARS = (
     "TEMPERATURE",
     "MAX_QUESTIONS",
     "MAX_QUESTIONS_PER_IP",
+    "MIN_DENSE_SCORE",
+    "LOG_SALT",
+    "LOG_RETENTION_DAYS",
     "RAW_DIR",
     "CHUNKS_DIR",
     "INDEX_DIR",
@@ -137,6 +140,30 @@ def test_non_numeric_max_questions_per_ip_fails_instead_of_silently_defaulting(
     assert "MAX_QUESTIONS_PER_IP" in message and "plenty" in message
 
 
+def test_non_numeric_min_dense_score_fails_instead_of_silently_defaulting(
+    isolated_env,
+):
+    # A typo falling back to the default would move the line between answering
+    # and refusing without anyone having decided to.
+    isolated_env.setenv("OPENAI_API_KEY", "sk-test")
+    isolated_env.setenv("MIN_DENSE_SCORE", "high")
+    with pytest.raises(RuntimeError) as excinfo:
+        load_config()
+    message = str(excinfo.value)
+    assert "MIN_DENSE_SCORE" in message and "high" in message
+
+
+def test_non_numeric_log_retention_fails_instead_of_silently_defaulting(
+    isolated_env,
+):
+    isolated_env.setenv("OPENAI_API_KEY", "sk-test")
+    isolated_env.setenv("LOG_RETENTION_DAYS", "forever")
+    with pytest.raises(RuntimeError) as excinfo:
+        load_config()
+    message = str(excinfo.value)
+    assert "LOG_RETENTION_DAYS" in message and "forever" in message
+
+
 # ---------------------------------------------------------------------------
 # Secret hygiene -- every query gets logged, so repr() is a leak surface
 # ---------------------------------------------------------------------------
@@ -152,6 +179,21 @@ def test_the_api_key_is_still_reachable_on_the_object(isolated_env):
     # correct if the key is still there to use.
     isolated_env.setenv("OPENAI_API_KEY", "sk-do-not-print-me")
     assert load_config().openai_api_key == "sk-do-not-print-me"
+
+
+def test_repr_does_not_contain_the_log_salt(isolated_env):
+    # The salt is what keeps a hashed address from being reversed by hashing
+    # every IPv4 address; printed into a traceback it protects nothing.
+    isolated_env.setenv("OPENAI_API_KEY", "sk-test")
+    isolated_env.setenv("LOG_SALT", "salt-do-not-print-me")
+    assert "salt-do-not-print-me" not in repr(load_config())
+
+
+def test_an_unset_log_salt_is_none(isolated_env):
+    # None, never a baked-in salt: a salt committed to the repository is one
+    # anybody can hash every address with.
+    isolated_env.setenv("OPENAI_API_KEY", "sk-test")
+    assert load_config().log_salt is None
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +217,10 @@ def test_defaults_match_the_documented_stack(isolated_env):
     # Three sessions' worth: wide enough that an office or a mobile carrier
     # behind one address is not locked out by its first visitor.
     assert cfg.max_questions_per_ip == 30
+    # Measured by `run_eval.py --floor`: the lowest in-scope question scores
+    # 0.190 and the highest unrelated one 0.177. See DECISIONS.md.
+    assert cfg.min_dense_score == 0.18
+    assert cfg.log_retention_days == 30
 
 
 def test_relative_paths_anchor_to_the_repo_root_not_the_working_directory(
@@ -284,6 +330,9 @@ def test_config_carries_no_fields_beyond_the_documented_set():
         "temperature",
         "max_questions",
         "max_questions_per_ip",
+        "min_dense_score",
+        "log_salt",
+        "log_retention_days",
         "raw_dir",
         "chunks_dir",
         "index_dir",

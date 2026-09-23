@@ -76,6 +76,11 @@ class Config:
     temperature: float
     max_questions: int
     max_questions_per_ip: int
+    min_dense_score: float
+    # repr=False for the reason the key has it: the salt is what stops a
+    # hashed address from being reversed by hashing every IPv4 address.
+    log_salt: str | None = field(repr=False)
+    log_retention_days: int
     raw_dir: Path
     chunks_dir: Path
     index_dir: Path
@@ -139,6 +144,15 @@ def load_config() -> Config:
         # behind the first visitor. Not a security control -- the address comes
         # from the connection and can be spoofed.
         max_questions_per_ip=_as_int("MAX_QUESTIONS_PER_IP", "30"),
+        # The best cosine similarity a question must reach before the model is
+        # called. Below it the answer is a refusal that costs nothing.
+        min_dense_score=_as_float("MIN_DENSE_SCORE", "0.18"),
+        # Unset means callers are logged as null. Never a default: a salt in
+        # the repository is one anybody can hash every address with.
+        log_salt=os.environ.get("LOG_SALT") or None,
+        # How long the local query log keeps a line. Host logs (stdout) follow
+        # the host's own retention, which this cannot set.
+        log_retention_days=_as_int("LOG_RETENTION_DAYS", "30"),
         raw_dir=_as_path("RAW_DIR", "data/raw"),
         chunks_dir=_as_path("CHUNKS_DIR", "data/chunks"),
         index_dir=_as_path("INDEX_DIR", "data/index"),

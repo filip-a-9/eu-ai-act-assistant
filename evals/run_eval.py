@@ -17,6 +17,7 @@ Usage:
     python evals/run_eval.py -k 10        # at a different k
     python evals/run_eval.py --sweep      # at 1, 3, 5, 10 and 20
     python evals/run_eval.py --followups  # the rewrite, over followups.yaml
+    python evals/run_eval.py --floor      # choose MIN_DENSE_SCORE, offtopic.yaml
 """
 
 from __future__ import annotations
@@ -38,6 +39,10 @@ from core.retrieve import Bm25Index, Hit, hybrid_search
 
 QUESTIONS_PATH = Path(__file__).parent / "questions.yaml"
 FOLLOWUPS_PATH = Path(__file__).parent / "followups.yaml"
+OFFTOPIC_PATH = Path(__file__).parent / "offtopic.yaml"
+# Candidate floors printed by --floor: fine steps where in-scope and unrelated
+# questions meet (0.177 against 0.190 when 0.18 was chosen), coarse above it.
+FLOORS = (0.15, 0.16, 0.17, 0.18, 0.19, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50)
 SWEEP = (1, 3, 5, 10, 20)
 # The three ways each follow-up is retrieved, in report order.
 CONDITIONS = ("typed", "rewrite", "standalone")
@@ -414,6 +419,11 @@ def main() -> int:
         action="store_true",
         help="score the follow-up rewrite over followups.yaml instead",
     )
+    parser.add_argument(
+        "--floor",
+        action="store_true",
+        help="report best dense similarity, in scope vs offtopic.yaml",
+    )
     args = parser.parse_args()
 
     config = load_config()
@@ -421,6 +431,8 @@ def main() -> int:
 
     if args.followups:
         return main_followups(config, top_k)
+    if args.floor:
+        return main_floor(config, top_k)
 
     questions = load_questions()
     collection = open_collection(config.index_dir, config.scratch_dir)
@@ -482,6 +494,55 @@ def main_followups(config, top_k: int) -> int:
         config.fusion_candidates,
     )
     report_followups(results, rewrites, top_k)
+    return 0
+
+
+def best_dense(hits: list[Hit]) -> float | None:
+    """The number core.generate.answer compares against MIN_DENSE_SCORE."""
+    return max((h.dense_score for h in hits if h.dense_score is not None), default=None)
+
+
+def main_floor(config, top_k: int) -> int:
+    """Where MIN_DENSE_SCORE should sit, measured rather than chosen.
+
+    Embedding calls only; nothing here generates. In scope is every question in
+    questions.yaml plus the standalone form of every follow-up, since the graph
+    answers the rewrite rather than what was typed.
+    """
+    in_scope = [q.question for q in load_questions()]
+    in_scope += [item.standalone for item in load_followups()]
+    offtopic = yaml.safe_load(OFFTOPIC_PATH.read_text(encoding="utf-8"))
+
+    collection = open_collection(config.index_dir, config.scratch_dir)
+    bm25 = open_bm25(config.chunks_dir)
+    embedder = openai_embedder(config.openai_api_key, config.embed_model)
+
+    def score(question: str) -> float:
+        hits = hybrid_search(
+            collection, bm25, embedder, question, top_k, config.fusion_candidates
+        )
+        best = best_dense(hits)
+        return -1.0 if best is None else best
+
+    scope_scores = sorted(score(q) for q in in_scope)
+    off_scores = [(entry, score(entry["question"])) for entry in offtopic]
+
+    print(f"in scope, n={len(scope_scores)}, lowest five:")
+    print("    " + "  ".join(f"{s:.3f}" for s in scope_scores[:5]))
+    print(f"\noff topic, n={len(off_scores)}, highest first:")
+    for entry, s in sorted(off_scores, key=lambda pair: -pair[1]):
+        print(f"    {s:.3f}  {entry['kind']:<9} {entry['id']}")
+
+    print("\n    floor  in-scope refused  unrelated+probe passed  adjacent passed")
+    for floor in FLOORS:
+        refused = sum(s < floor for s in scope_scores)
+        passed = sum(
+            s >= floor for entry, s in off_scores if entry["kind"] != "adjacent"
+        )
+        adjacent = sum(
+            s >= floor for entry, s in off_scores if entry["kind"] == "adjacent"
+        )
+        print(f"    {floor:.3f}  {refused:>16}  {passed:>22}  {adjacent:>15}")
     return 0
 
 

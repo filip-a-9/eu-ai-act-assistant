@@ -20,7 +20,15 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from core.index import build, open_collection
-from core.retrieve import Hit, found_by, fuse, hybrid_search, log_query, search
+from core.retrieve import (
+    Hit,
+    caller_id,
+    found_by,
+    fuse,
+    hybrid_search,
+    log_query,
+    search,
+)
 
 
 @pytest.fixture
@@ -313,6 +321,124 @@ def test_the_log_never_contains_an_api_key(tmp_path, collection, fake_embedder):
     hits = search(collection, fake_embedder, "prohibited practices", 2)
     log_query("prohibited practices", hits, tmp_path)
     assert "sk-" not in (tmp_path / "queries.jsonl").read_text(encoding="utf-8")
+
+
+def test_the_log_records_what_the_turn_ended_in(tmp_path):
+    # Retrieval alone cannot say whether a turn was answered; the caller hands
+    # that in, and it lands beside the keys CLAUDE.md requires.
+    log_query("q", [], tmp_path, outcome={"refused": True, "reason": "below_floor"})
+    entry = json.loads((tmp_path / "queries.jsonl").read_text(encoding="utf-8"))
+    assert entry["refused"] is True and entry["reason"] == "below_floor"
+
+
+def test_every_entry_is_also_emitted_on_the_queries_logger(tmp_path, caplog):
+    # A deployed host wipes local disk on restart; its log viewer collects
+    # whatever a handler on this logger writes. The CLI attaches none.
+    with caplog.at_level("INFO", logger="queries"):
+        log_query("prohibited practices", [], tmp_path)
+    emitted = [
+        json.loads(r.getMessage()) for r in caplog.records if r.name == "queries"
+    ]
+    assert [entry["question"] for entry in emitted] == ["prohibited practices"]
+
+
+def _seed_log(path, *ages_in_days):
+    from datetime import UTC, datetime, timedelta
+
+    now = datetime.now(UTC)
+    path.mkdir(parents=True, exist_ok=True)
+    lines = [
+        json.dumps({"at": (now - timedelta(days=d)).isoformat(), "question": f"d{d}"})
+        for d in ages_in_days
+    ]
+    (path / "queries.jsonl").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_lines_older_than_the_retention_period_are_dropped(tmp_path):
+    _seed_log(tmp_path, 45, 10)
+    log_query("new", [], tmp_path, retention_days=30)
+    lines = (tmp_path / "queries.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["question"] for line in lines] == ["d10", "new"]
+
+
+def test_without_a_retention_period_nothing_is_dropped(tmp_path):
+    _seed_log(tmp_path, 400)
+    log_query("new", [], tmp_path)
+    lines = (tmp_path / "queries.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(line)["question"] for line in lines] == ["d400", "new"]
+
+
+def test_a_log_with_a_torn_multibyte_character_does_not_break_logging(tmp_path):
+    # A crash mid-write can cut a line inside a UTF-8 character, since entries
+    # are written with ensure_ascii=False. Pruning must survive reading it:
+    # otherwise every later turn is paid for and then fails.
+    _seed_log(tmp_path, 10)
+    with (tmp_path / "queries.jsonl").open("ab") as handle:
+        handle.write(b'{"at": "2026-09-23", "question": "caf\xc3\n')
+    log_query("new", [], tmp_path, retention_days=30)
+    last = (tmp_path / "queries.jsonl").read_bytes().splitlines()[-1]
+    assert json.loads(last)["question"] == "new"
+
+
+def test_a_log_that_cannot_be_written_does_not_raise(tmp_path, caplog):
+    # A turn that has already been paid for is not failed by its log. The
+    # entry still reaches the queries logger, the copy a host keeps.
+    blocked = tmp_path / "logs"
+    blocked.write_text("a file where the log directory should be")
+    with caplog.at_level("INFO", logger="queries"):
+        log_query("new", [], blocked, retention_days=30)
+    assert any('"question": "new"' in r.getMessage() for r in caplog.records)
+
+
+def test_pruning_does_not_lose_a_line_written_while_it_runs(tmp_path, monkeypatch):
+    # Streamlit serves sessions as threads in one process. Turn B appends while
+    # turn A is between reading the log and rewriting it; without a lock, A's
+    # rewrite silently drops B's line.
+    import threading
+
+    import core.retrieve as retrieve
+
+    _seed_log(tmp_path, 45)
+    real_older_than = retrieve._older_than
+    other = threading.Thread(target=log_query, args=("turn B", [], tmp_path))
+
+    def older_than_while_b_writes(line, cutoff):
+        if not other.is_alive() and other.ident is None:
+            other.start()
+            other.join(timeout=0.3)  # B finishes here unless a lock holds it
+        return real_older_than(line, cutoff)
+
+    monkeypatch.setattr(retrieve, "_older_than", older_than_while_b_writes)
+    log_query("turn A", [], tmp_path, retention_days=30)
+    other.join()
+
+    lines = (tmp_path / "queries.jsonl").read_text(encoding="utf-8").splitlines()
+    assert sorted(json.loads(line)["question"] for line in lines) == [
+        "turn A",
+        "turn B",
+    ]
+
+
+def test_a_caller_is_not_identified_without_a_salt():
+    # Unsalted, a hash of an IPv4 address is reversed by hashing all four
+    # billion of them. No salt means no identifier at all.
+    assert caller_id("203.0.113.7", None) is None
+
+
+def test_a_caller_id_does_not_contain_the_address():
+    assert "203.0.113.7" not in caller_id("203.0.113.7", "pepper")
+
+
+def test_one_address_gets_one_id_under_one_salt():
+    assert caller_id("203.0.113.7", "pepper") == caller_id("203.0.113.7", "pepper")
+
+
+def test_two_addresses_get_different_ids():
+    assert caller_id("203.0.113.7", "pepper") != caller_id("203.0.113.8", "pepper")
+
+
+def test_a_different_salt_gives_a_different_id():
+    assert caller_id("203.0.113.7", "pepper") != caller_id("203.0.113.7", "salt")
 
 
 # ---------------------------------------------------------------------------

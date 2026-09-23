@@ -26,10 +26,15 @@ Nothing in this module interprets the text it retrieves. A chunk is data.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import logging
+import os
 import re
+import threading
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -38,6 +43,10 @@ from rank_bm25 import BM25Okapi
 from core.embed import Embedder
 
 LOG_FILENAME = "queries.jsonl"
+
+# Silent unless a handler is attached, which only app.py does.
+_query_log = logging.getLogger("queries")
+_log_lock = threading.Lock()
 
 # The RRF constant, from Cormack et al. (2009), which found 60 insensitive
 # enough across collections to be worth fixing. It flattens the curve so that
@@ -319,11 +328,26 @@ def found_by(hit: Hit) -> str:
     return "semantic" if hit.dense_rank is not None else "keyword"
 
 
+def caller_id(address: str | None, salt: str | None) -> str | None:
+    """A stable pseudonym for a client address, or None.
+
+    Enough to see that one visitor asked twelve questions, not who they were.
+    Salted, because an unsalted hash of an IPv4 address is reversed by hashing
+    all four billion of them; without a salt nothing is recorded at all.
+    """
+    if not address or not salt:
+        return None
+    return hashlib.sha256(f"{salt}:{address}".encode()).hexdigest()[:16]
+
+
 def log_query(
     question: str,
     hits: list[Hit],
     logs_dir: Path,
     rewritten: str | None = None,
+    *,
+    outcome: Mapping[str, Any] | None = None,
+    retention_days: int | None = None,
 ) -> None:
     """Append one JSON line recording what was asked and what came back.
 
@@ -334,9 +358,19 @@ def log_query(
 
     The chunk *text* is deliberately not logged. The ids identify it exactly,
     and a log that duplicates the corpus is one that nobody will read.
+
+    ``outcome`` is what the turn ended in -- refused or not, and why -- which
+    retrieval cannot know and the graph hands in. Each entry also goes to the
+    ``queries`` logger: a deployed host wipes local disk on restart, and its
+    log viewer collects whatever a handler there writes. Only the app attaches
+    one, so ``query.py --json`` output stays clean.
+
+    Never raises. By the time a turn is logged its model call has been paid
+    for, and a full disk or a mangled log file must not turn that into an
+    error page. The logger copy goes first, so it survives a failed write.
     """
     logs_dir = Path(logs_dir)
-    logs_dir.mkdir(parents=True, exist_ok=True)
+    path = logs_dir / LOG_FILENAME
     entry = {
         "at": datetime.now(UTC).isoformat(timespec="seconds"),
         "question": question,
@@ -350,9 +384,52 @@ def log_query(
         # which is the difference between a ranking problem and a blind spot.
         "dense_ranks": [hit.dense_rank for hit in hits],
         "bm25_ranks": [hit.bm25_rank for hit in hits],
+        **(outcome or {}),
     }
-    with (logs_dir / LOG_FILENAME).open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    line = json.dumps(entry, ensure_ascii=False)
+    _query_log.info(line)
+    try:
+        # One lock across prune and append: Streamlit serves sessions as
+        # threads, and a rewrite racing an append drops the appended line.
+        with _log_lock:
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            if retention_days is not None:
+                _prune(path, datetime.now(UTC) - timedelta(days=retention_days))
+            with path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(line + "\n")
+    except OSError as exc:
+        _query_log.warning("query log not written to %s: %r", path, exc)
+
+
+def _prune(path: Path, cutoff: datetime) -> None:
+    """Drop lines logged before ``cutoff``, rewriting the file only if any go.
+
+    A line whose timestamp cannot be read is kept: deleting what cannot be
+    dated is a worse failure than keeping it a while longer. That includes a
+    line torn inside a UTF-8 character by a crash, which ``surrogateescape``
+    carries through the rewrite byte for byte instead of raising on. The
+    rewrite goes to a temporary file first, so a crash midway loses nothing.
+    """
+    if not path.exists():
+        return
+    text = path.read_text(encoding="utf-8", errors="surrogateescape")
+    lines = text.splitlines()
+    kept = [line for line in lines if not _older_than(line, cutoff)]
+    if len(kept) < len(lines):
+        staged = path.with_name(path.name + ".tmp")
+        staged.write_text(
+            "".join(f"{line}\n" for line in kept),
+            encoding="utf-8",
+            errors="surrogateescape",
+        )
+        os.replace(staged, path)
+
+
+def _older_than(line: str, cutoff: datetime) -> bool:
+    try:
+        return datetime.fromisoformat(json.loads(line)["at"]) < cutoff
+    except (ValueError, KeyError, TypeError):
+        return False
 
 
 def hit_to_dict(hit: Hit) -> dict[str, Any]:

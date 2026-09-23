@@ -31,7 +31,7 @@ def graph_for(tmp_path, built_index, bm25_index, fake_embedder):
     collection = open_collection(built_index)
     logs_dir = tmp_path / "logs"
 
-    def _build(generator, top_k=3):
+    def _build(generator, top_k=3, min_dense_score=0.0):
         return (
             build_graph(
                 collection=collection,
@@ -40,7 +40,9 @@ def graph_for(tmp_path, built_index, bm25_index, fake_embedder):
                 generator=generator,
                 top_k=top_k,
                 fusion_candidates=10,
+                min_dense_score=min_dense_score,
                 logs_dir=logs_dir,
+                log_retention_days=None,
             ),
             logs_dir,
         )
@@ -148,3 +150,50 @@ def test_the_graph_retrieves_through_both_retrievers(graph_for, fake_generator):
     assert len(entry["bm25_ranks"]) == len(entry["chunk_ids"])
     # Something was found lexically: a dense-only path leaves these all null.
     assert any(rank is not None for rank in entry["bm25_ranks"])
+
+
+# ---------------------------------------------------------------------------
+# The log records what the turn ended in
+# ---------------------------------------------------------------------------
+
+
+def test_an_answered_turn_is_logged_with_its_answer(graph_for, fake_generator):
+    graph, logs_dir = graph_for(fake_generator(ANSWER))
+    run_turn(graph, "which practices are prohibited?", history=[])
+    entry = log_lines(logs_dir)[0]
+    assert entry["refused"] is False and entry["answer"] == ANSWER
+
+
+def test_a_refused_turn_is_logged_with_the_check_it_failed(graph_for, fake_generator):
+    graph, logs_dir = graph_for(fake_generator(UNCITED))
+    run_turn(graph, "may I score my customers?", history=[])
+    entry = log_lines(logs_dir)[0]
+    assert entry["refused"] is True and entry["reason"] == "no_citation"
+
+
+def test_a_refused_turn_is_logged_with_what_the_model_wrote(graph_for, fake_generator):
+    # The answer field holds the fixed refusal; the draft is what was caught.
+    graph, logs_dir = graph_for(fake_generator(UNCITED))
+    run_turn(graph, "may I score my customers?", history=[])
+    assert log_lines(logs_dir)[0]["draft"] == UNCITED
+
+
+def test_a_turn_below_the_floor_never_reaches_the_model(graph_for, exploding_generator):
+    # No fixture chunk scores 0.99 against anything, so the floor refuses
+    # before generation -- and the log says that is why.
+    graph, logs_dir = graph_for(exploding_generator, min_dense_score=0.99)
+    answer = run_turn(graph, "which practices are prohibited?", history=[])
+    assert answer.refused is True
+    assert log_lines(logs_dir)[0]["reason"] == "below_floor"
+
+
+def test_the_log_records_how_long_the_turn_took(graph_for, fake_generator):
+    graph, logs_dir = graph_for(fake_generator(ANSWER))
+    run_turn(graph, "which practices are prohibited?", history=[])
+    assert log_lines(logs_dir)[0]["latency_ms"] >= 0
+
+
+def test_the_log_records_the_caller_it_was_given(graph_for, fake_generator):
+    graph, logs_dir = graph_for(fake_generator(ANSWER))
+    run_turn(graph, "which practices are prohibited?", history=[], caller="c0ffee")
+    assert log_lines(logs_dir)[0]["caller"] == "c0ffee"

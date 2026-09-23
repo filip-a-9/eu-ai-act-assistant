@@ -18,6 +18,9 @@ this file from the repository root, so ``core`` is already importable.
 
 from __future__ import annotations
 
+import logging
+import sys
+
 import streamlit as st
 
 from core.config import load_config
@@ -25,7 +28,7 @@ from core.embed import openai_embedder
 from core.generate import Answer, link_citations, openai_generator
 from core.graph import build_graph, run_turn
 from core.index import open_bm25, open_collection
-from core.retrieve import found_by
+from core.retrieve import caller_id, found_by, log_query
 
 DISCLAIMER = (
     "Not legal advice. Answers are generated from the text of Regulation (EU) "
@@ -52,6 +55,14 @@ def _assistant():
     construct two API clients per interaction.
     """
     config = load_config()
+    # The query log's copy for the host: its log viewer keeps stdout, where a
+    # restart wipes data/logs. Attached here, once per process, so reruns do
+    # not stack handlers and the CLI never prints log lines at all.
+    queries = logging.getLogger("queries")
+    if not queries.handlers:
+        queries.addHandler(logging.StreamHandler(sys.stdout))
+        queries.setLevel(logging.INFO)
+        queries.propagate = False
     graph = build_graph(
         collection=open_collection(config.index_dir, config.scratch_dir),
         bm25=open_bm25(config.chunks_dir),
@@ -61,7 +72,9 @@ def _assistant():
         ),
         top_k=config.top_k,
         fusion_candidates=config.fusion_candidates,
+        min_dense_score=config.min_dense_score,
         logs_dir=config.logs_dir,
+        log_retention_days=config.log_retention_days,
     )
     return config, graph
 
@@ -121,6 +134,14 @@ except RuntimeError as exc:
     st.error(str(exc))
     st.stop()
 
+# A notice rather than a consent box: logging questions to run and debug the
+# demo needs no consent, only saying so, and asking for data to be kept out.
+st.caption(
+    "Questions are logged to improve this demo and kept for "
+    f"{config.log_retention_days} days; the hosting platform keeps its own "
+    "logs. Please do not enter personal data."
+)
+
 # Three counters, and none of them is interchangeable with another. ``turns``
 # is the conversation, which the visitor may clear. ``asked`` is what this
 # session has spent, which they may not: a cap a button resets is not a cap.
@@ -136,6 +157,8 @@ turns: list[tuple[str, Answer]] = st.session_state.turns
 # address comes from the connection and can be spoofed; this raises the effort
 # of a reset from a keypress to a new address, and claims nothing more.
 caller = st.context.ip_address or "local"
+# What the log sees instead of the address: a salted pseudonym, or nothing.
+pseudonym = caller_id(st.context.ip_address, config.log_salt)
 spent = _ip_spend()
 at_session_cap = st.session_state.asked >= config.max_questions
 at_ip_cap = spent.get(caller, 0) >= config.max_questions_per_ip
@@ -190,14 +213,34 @@ if question and not at_cap:
         try:
             # History is the current thread only, in the shape the CLI passes:
             # one turn is a function of the question and what came before it.
-            result = run_turn(graph, question, [(q, a.text) for q, a in turns])
+            result = run_turn(
+                graph, question, [(q, a.text) for q, a in turns], caller=pseudonym
+            )
         except Exception as exc:
             # Anything the API can raise -- rate limit, timeout, revoked key --
             # becomes a message in the thread rather than a blank page. The
             # turn is not recorded and is not counted, because it produced no
-            # answer and, for most of these, no billable call.
+            # answer and, for most of these, no billable call. It is logged,
+            # since the graph never reached the node that logs: the exception
+            # type only, as a message can carry request details -- which is
+            # also why the visitor is shown neither.
             result = None
-            st.error(f"That question could not be answered just now: {exc}")
+            log_query(
+                question,
+                [],
+                config.logs_dir,
+                outcome={
+                    "refused": True,
+                    "reason": "error",
+                    "error": type(exc).__name__,
+                    "caller": pseudonym,
+                },
+                retention_days=config.log_retention_days,
+            )
+            st.error(
+                "That question could not be answered just now. Please try "
+                "again in a moment."
+            )
 
     if result is not None:
         st.session_state.turns.append((question, result))

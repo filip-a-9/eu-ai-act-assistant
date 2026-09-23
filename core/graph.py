@@ -16,6 +16,7 @@ and a canned generator, and never reach the network.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
@@ -41,6 +42,9 @@ class State(TypedDict, total=False):
     rewritten: str | None
     hits: list[Hit]
     answer: Answer
+    # For the log only: a pseudonym for who asked, and when the turn began.
+    caller: str | None
+    started: float
 
 
 def build_graph(
@@ -51,7 +55,9 @@ def build_graph(
     generator: Generator,
     top_k: int,
     fusion_candidates: int,
+    min_dense_score: float | None,
     logs_dir: Path,
+    log_retention_days: int | None,
 ):
     """Compile the graph over the given retrievers, embedder and generator."""
 
@@ -69,16 +75,37 @@ def build_graph(
             top_k,
             fusion_candidates,
         )
-        # The one place a query is logged. Putting it in the node rather than
-        # in the CLI means the app, the CLI and any future caller all log,
-        # because none of them can retrieve without passing through here.
-        log_query(state["question"], hits, logs_dir, state.get("rewritten"))
         return {"hits": hits}
 
     def generate_node(state: State) -> State:
-        return {
-            "answer": answer(generator, _search_question(state), state.get("hits", []))
-        }
+        hits = state.get("hits", [])
+        result = answer(generator, _search_question(state), hits, min_dense_score)
+        # The one place a turn is logged: here rather than in the CLI or the
+        # app, so no caller can skip it, and here rather than in retrieve,
+        # because only now is it known what the turn ended in.
+        started = state.get("started")
+        log_query(
+            state["question"],
+            hits,
+            logs_dir,
+            state.get("rewritten"),
+            outcome={
+                "refused": result.refused,
+                "reason": result.reason,
+                "unsupported": list(result.unsupported),
+                "answer": result.text,
+                # What a refusal replaced, so a caught jailbreak can be read.
+                "draft": result.draft,
+                "latency_ms": (
+                    None
+                    if started is None
+                    else round((time.monotonic() - started) * 1000)
+                ),
+                "caller": state.get("caller"),
+            },
+            retention_days=log_retention_days,
+        )
+        return {"answer": result}
 
     def refuse_node(state: State) -> State:
         # Drop the retrieved chunks from a refusal. They did not support an
@@ -115,7 +142,12 @@ def _after_generate(state: State) -> str:
     return "refuse" if state["answer"].refused else END
 
 
-def run_turn(graph: Any, question: str, history: Sequence[tuple[str, str]]) -> Answer:
+def run_turn(
+    graph: Any,
+    question: str,
+    history: Sequence[tuple[str, str]],
+    caller: str | None = None,
+) -> Answer:
     """Run one turn and hand back its answer.
 
     A small seam so callers construct the state in one place: a caller that
@@ -123,6 +155,12 @@ def run_turn(graph: Any, question: str, history: Sequence[tuple[str, str]]) -> A
     not broken.
     """
     final = graph.invoke(
-        {"question": question, "history": list(history), "rewritten": None}
+        {
+            "question": question,
+            "history": list(history),
+            "rewritten": None,
+            "caller": caller,
+            "started": time.monotonic(),
+        }
     )
     return final["answer"]
