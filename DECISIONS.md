@@ -1050,3 +1050,78 @@ Swept offline over one embedding pass, varying the fusion rule in memory:
   chunk at rank 1 and a lexical-only chunk at rank 1 score identically, and
   ordering them by dict insertion would make two runs over one corpus disagree.
   An eval delta that moves for that reason is unreadable.
+
+## Phase 11 — measuring the follow-up rewrite (2026-09-23)
+
+The rewrite node had shipped since Phase 3 without ever being measured: every
+question in `questions.yaml` is a first turn. It is now, and it recovers most
+but not all of what a standalone question retrieves.
+
+### What was built
+
+- **`evals/followups.yaml`, 11 items, in its own file** — adding them to
+  `questions.yaml` would move the 36-question headline and break comparison
+  with every number above. Each item holds fixed history answers with real
+  citations, so a run measures the rewriter and nothing upstream of it.
+- **`run_eval.py --followups` retrieves each item three ways** — as typed (the
+  control, which shows the metric can fail), through `core.generate.rewrite`
+  (the function the graph calls, not a copy), and as a hand-written standalone
+  (the ceiling). Without the flag the output is unchanged.
+- **The generator is capped at one call per item for the whole invocation** —
+  `CappedGenerator` raises before the call that would exceed it. Embedding
+  calls stay uncapped, as in the single-turn eval.
+
+### What it measured
+
+| top_k = 5 | typed | rewrite | standalone |
+|---|---|---|---|
+| any, run 1 | 0.55 | **0.73** | 1.00 |
+| any, run 2 | 0.55 | **0.73** | 1.00 |
+| all, both runs | 0.45 | **0.73** | 0.82 |
+| MRR@5, run 1 / run 2 | 0.417 | **0.667 / 0.621** | 0.705 |
+
+- **Stable across two runs at temperature 1.0** — the rewrite text varied in
+  wording, the hit pattern did not: the same eight items hit and the same three
+  lost both times. Only MRR moved.
+- **The rewrite lost no hit** — both already-standalone items came back
+  verbatim, and no item hit as typed but missed as rewritten. The per-item
+  output prints no ranks, so harm to MRR on an item is not ruled out. It
+  rescued one item the control missed, `pronoun-deployer-fria`.
+- **`lay-emotion-outside-work` cannot detect the echo it was written for** —
+  both gold chunks match on "emotion recognition" alone, and run 1's rewrite
+  ("Is the use of emotion recognition AI in a shop prohibited…") carried the
+  Article 5 topic forward and still scored a hit. It is not counted as a
+  rescue.
+- **Standalone is a ceiling on any@5, not on all@5** — the only two items
+  with two gold chunks, `pronoun-register` and `lay-emotion-outside-work`,
+  are where standalone found one and the rewrite found both. Rewrite all@5 at
+  0.73 against standalone's 0.82 is not a plain shortfall.
+- **The control is weaker than intended** — four genuine follow-ups
+  (`ellipsis-deployers`, `pronoun-register`, `pronoun-sandbox-priority`,
+  `implicit-certificate`) hit as typed, because the follow-up alone carries
+  "deployers", "register", "sandboxes" or "certificate". Only five of eleven
+  items separate a rewrite from no rewrite.
+
+### Where the rewrite lost to the ceiling
+
+- **`ellipsis-sme-fines`** — "What are the fines for small companies using a
+  prohibited AI practice?" The referent is resolved, but "small companies" is
+  carried over instead of the Act's "SMEs", and retrieval lands on Article 101
+  and Article 5 rather than Article 99(6). "and for small companies?" is
+  verbatim an example in `REWRITE_PROMPT`, and the rewriter still did not
+  reach "SMEs".
+- **`lay-tell-candidates`** — "Do I have to inform job applicants that software
+  is automatically ranking their applications?" Correct in meaning, but it
+  keeps the user's register; "deployer" and "high-risk AI system" never appear,
+  and Article 26(11) is absent from the top five.
+- **`two-turns-back-oversight`** — "Are there additional human oversight
+  requirements for remote biometric identification systems?" The two-turn
+  referent is resolved correctly, skipping the AI-literacy turn in between.
+  The top five are recitals 95, 17, 73 and 39 with Article 3(42), and the
+  standalone that hits differs only in phrasing. Retrieval is brittle to
+  wording here; a prompt that produced wording closer to the standalone could
+  still recover it.
+
+The first two share a cause the prompt does not address: it asks for pronouns
+and ellipsis resolved, not for lay vocabulary translated into the Act's. That
+is a candidate `REWRITE_PROMPT` change, not taken here.

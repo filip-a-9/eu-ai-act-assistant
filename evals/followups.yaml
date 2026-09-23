@@ -1,0 +1,180 @@
+# Follow-up eval set: does rewriting a follow-up recover standalone retrieval?
+#
+# Kept apart from questions.yaml so the 36-question headline stays comparable
+# with every number already in DECISIONS.md.
+#
+# Each item is retrieved three ways by `run_eval.py --followups`: on `question`
+# as typed, on what core.generate.rewrite makes of it, and on `standalone`, the
+# hand-written equivalent. The first is the control -- a follow-up like "and for
+# deployers?" should miss on its own, which shows the metric can fail. The last
+# is the ceiling a perfect rewrite would reach.
+#
+# `history` is [question, answer] pairs, oldest first. The answers are fixed
+# text with real bracketed citations rather than generated live, so a run
+# measures the rewriter and nothing upstream of it.
+#
+# `expect` follows questions.yaml: alternatives, any one of which is a correct
+# landing point. Every id was read out of data/chunks/chunks.jsonl.
+
+- id: ellipsis-deployers
+  history:
+    - - What are the obligations of providers of high-risk AI systems?
+      - Providers must ensure their high-risk systems comply with the Section 2
+        requirements [Article 16(a)], have a quality management system in place
+        [Article 16(c)], and register the system before placing it on the
+        market [Article 16(i)].
+  question: And for deployers?
+  standalone: What are the obligations of deployers of high-risk AI systems?
+  expect: [art_26.para_1]
+  note: >
+    Ellipsis, and gold that differs from the previous turn's. A rewrite that
+    echoes the provider topic lands on Article 16 and scores a miss.
+
+- id: pronoun-register
+  history:
+    - - What must providers of high-risk AI systems do before selling them?
+      - They must ensure the system has undergone the relevant conformity
+        assessment procedure [Article 16(f)] and draw up an EU declaration of
+        conformity [Article 16(g)].
+  question: Do they also need to register them somewhere?
+  standalone: >
+    Do providers of high-risk AI systems need to register the system in the EU
+    database before placing it on the market?
+  expect: [art_49.para_1, art_16.point_i]
+  note: Two pronouns, "they" for providers and "them" for the systems.
+
+- id: ellipsis-sme-fines
+  history:
+    - - What are the fines for using a prohibited AI practice?
+      - Non-compliance with the prohibitions in Article 5 is subject to fines of
+        up to EUR 35 000 000 or 7 % of total worldwide annual turnover,
+        whichever is higher [Article 99(3)].
+  question: and for small companies?
+  standalone: How are the fines under the AI Act capped for SMEs and start-ups?
+  expect: [art_99.para_6]
+  note: >
+    Ellipsis where the rewrite must carry "fines" forward and translate
+    "small companies" toward the Act's "SMEs".
+
+- id: pronoun-sandbox-priority
+  history:
+    - - What are AI regulatory sandboxes?
+      - Each Member State must establish at least one AI regulatory sandbox at
+        national level, operational by 2 August 2027 [Article 57(1)].
+  question: Can start-ups get priority access to them?
+  standalone: Do SMEs and start-ups get priority access to AI regulatory sandboxes?
+  expect: [art_62.para_1]
+  note: >
+    "Them" is the sandboxes, and the gold is outside Article 57, which a rewrite
+    that simply restates the previous topic would keep retrieving.
+
+- id: pronoun-deployer-fria
+  history:
+    - - Who counts as a deployer under the AI Act?
+      - A deployer is a natural or legal person, public authority, agency or
+        other body using an AI system under its authority, except in a personal
+        non-professional activity [Article 3(4)].
+    - - What do deployers of high-risk AI systems have to do?
+      - They must use the system in accordance with its instructions for use
+        [Article 26(1)] and assign human oversight to competent natural persons
+        [Article 26(2)].
+  question: Do they have to do a fundamental rights assessment as well?
+  standalone: >
+    Do deployers of high-risk AI systems have to perform a fundamental rights
+    impact assessment?
+  expect: [art_27.para_1]
+
+- id: two-turns-back-oversight
+  history:
+    - - What does human oversight of high-risk AI systems require?
+      - High-risk AI systems must be designed so that natural persons can
+        effectively oversee them while they are in use [Article 14(1)].
+    - - What does the AI literacy obligation require?
+      - Providers and deployers must take measures to support the AI literacy of
+        their staff dealing with the operation and use of AI systems
+        [Article 4(1)].
+  question: >
+    Back to the first thing you mentioned: is there anything extra for remote
+    biometric identification systems?
+  standalone: >
+    What additional human oversight requirement applies to remote biometric
+    identification systems?
+  expect: [art_14.para_5]
+  note: >
+    The referent is two turns back, inside HISTORY_TURNS = 3. The most recent
+    turn is about AI literacy, which is the wrong topic to carry forward.
+
+- id: implicit-certificate
+  history:
+    - - When is a notified body involved in the conformity assessment of a
+        high-risk AI system?
+      - For biometric systems in Annex III point 1, the provider must follow the
+        Annex VII procedure involving a notified body where harmonised standards
+        or common specifications have not been applied [Article 43(1)].
+  question: How long is the certificate valid?
+  standalone: >
+    How long is a certificate issued by a notified body for a high-risk AI
+    system valid?
+  expect: [art_44.para_2]
+  note: >
+    "The certificate" is only definite because of the previous turn; it names
+    no issuer and no system.
+
+- id: already-standalone-deepfake
+  history:
+    - - What are the fines for using a prohibited AI practice?
+      - Non-compliance with the prohibitions in Article 5 is subject to fines of
+        up to EUR 35 000 000 or 7 % of total worldwide annual turnover,
+        whichever is higher [Article 99(3)].
+  question: What must deployers disclose when their AI system generates deep fakes?
+  standalone: What must deployers disclose when their AI system generates deep fakes?
+  expect: [art_50.para_4]
+  note: >
+    Already standalone and unrelated to the history. The rewrite must return it
+    unchanged, or at least not drag the fines topic into it.
+
+- id: already-standalone-literacy
+  history:
+    - - Which AI systems used in employment are high-risk?
+      - AI systems for recruitment or selection, including analysing and
+        filtering job applications, and for decisions on promotion or
+        termination are high-risk [Annex III, point 4].
+  question: What does the AI Act require regarding AI literacy of staff?
+  standalone: What does the AI Act require regarding AI literacy of staff?
+  expect: [art_4.para_1]
+  note: A second already-standalone item, so one lucky rewrite cannot carry it.
+
+- id: lay-tell-candidates
+  history:
+    - - We use software that ranks job applicants automatically. Is that
+        high-risk?
+      - Yes. AI systems intended to be used for recruitment or selection, in
+        particular to analyse and filter job applications and to evaluate
+        candidates, are high-risk [Annex III, point 4].
+  question: So do I have to tell the people applying that?
+  standalone: >
+    Must a deployer of a high-risk AI system used in recruitment inform the
+    applicants that they are subject to its use?
+  expect: [art_26.para_11]
+  note: >
+    Lay-phrased. "That" is the use of the system, "the people applying" are
+    the natural persons of Article 26(11). Article 26(7) is about workers,
+    not applicants, and is deliberately not gold.
+
+- id: lay-emotion-outside-work
+  history:
+    - - Is emotion recognition AI banned?
+      - Emotion recognition is prohibited in the areas of the workplace and
+        education institutions, except for medical or safety reasons
+        [Article 5(1)].
+  question: What if we use it in a shop instead?
+  standalone: >
+    What obligations apply to deployers of emotion recognition systems outside
+    the workplace and education?
+  expect: [art_50.para_3, anx_III.point_1]
+  note: >
+    Outside the prohibition, emotion recognition is high-risk under Annex III
+    point 1(c) and carries the Article 50(3) duty to inform. Both gold chunks
+    match on "emotion recognition" alone, so a rewrite that echoes the Article
+    5 prohibition still scores a hit: this item tests the lay phrasing, not
+    the echo.

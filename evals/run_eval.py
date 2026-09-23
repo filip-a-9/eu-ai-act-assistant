@@ -16,13 +16,14 @@ Usage:
     python evals/run_eval.py              # recall at the configured top_k
     python evals/run_eval.py -k 10        # at a different k
     python evals/run_eval.py --sweep      # at 1, 3, 5, 10 and 20
+    python evals/run_eval.py --followups  # the rewrite, over followups.yaml
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
@@ -31,11 +32,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from core.config import load_config
 from core.embed import openai_embedder
+from core.generate import Generator, openai_generator, rewrite
 from core.index import open_bm25, open_collection
 from core.retrieve import Bm25Index, Hit, hybrid_search
 
 QUESTIONS_PATH = Path(__file__).parent / "questions.yaml"
+FOLLOWUPS_PATH = Path(__file__).parent / "followups.yaml"
 SWEEP = (1, 3, 5, 10, 20)
+# The three ways each follow-up is retrieved, in report order.
+CONDITIONS = ("typed", "rewrite", "standalone")
 
 
 @dataclass(frozen=True)
@@ -44,7 +49,9 @@ class Question:
     question: str
     expect: list[str]
     article_no: str
-    group: str  # "statutory" (the Act's own vocabulary) or "lay"
+    # "statutory" (the Act's own vocabulary) or "lay"; under --followups, the
+    # condition the item was retrieved in.
+    group: str
 
 
 @dataclass(frozen=True)
@@ -104,6 +111,58 @@ def load_questions() -> list[Question]:
             f"duplicate question ids in questions.yaml: {sorted(duplicates)}"
         )
     return questions
+
+
+@dataclass(frozen=True)
+class Followup:
+    id: str
+    history: list[tuple[str, str]]
+    question: str
+    standalone: str
+    expect: list[str]
+
+
+def load_followups() -> list[Followup]:
+    raw = yaml.safe_load(FOLLOWUPS_PATH.read_text(encoding="utf-8"))
+    items = [
+        Followup(
+            id=entry["id"],
+            history=[(asked, replied) for asked, replied in entry["history"]],
+            question=entry["question"].strip(),
+            standalone=entry["standalone"].strip(),
+            expect=list(entry["expect"]),
+        )
+        for entry in raw
+    ]
+    ids = [item.id for item in items]
+    duplicates = {i for i in ids if ids.count(i) > 1}
+    if duplicates:
+        raise SystemExit(
+            f"duplicate follow-up ids in followups.yaml: {sorted(duplicates)}"
+        )
+    return items
+
+
+@dataclass
+class CappedGenerator:
+    """Passes calls through until ``limit`` is spent, then raises before calling.
+
+    One instance per invocation, so the cap is a total and not a per-item
+    allowance: a retry loop or a stray second call cannot quietly double the
+    bill, it stops the run.
+    """
+
+    inner: Generator
+    limit: int
+    used: int = field(default=0)
+
+    def complete(self, system: str, user: str) -> str:
+        if self.used >= self.limit:
+            raise RuntimeError(
+                f"generator spend cap reached: {self.limit} calls already made"
+            )
+        self.used += 1
+        return self.inner.complete(system, user)
 
 
 def check_gold_exists(questions: list[Question], collection) -> None:
@@ -263,6 +322,79 @@ def sweep(results_by_k: dict[int, list[Result]]) -> None:
         )
 
 
+def run_followups(
+    items: list[Followup],
+    generator: Generator,
+    collection,
+    bm25: Bm25Index,
+    embedder,
+    top_k: int,
+    candidates: int,
+) -> tuple[dict[str, list[Result]], dict[str, str]]:
+    """Retrieve each follow-up as typed, as rewritten, and as its standalone.
+
+    The rewrite goes through ``core.generate.rewrite``, the function the graph
+    calls, so what is measured is what ships and not a copy of it.
+    """
+    results: dict[str, list[Result]] = {condition: [] for condition in CONDITIONS}
+    rewrites: dict[str, str] = {}
+    for item in items:
+        rewrites[item.id] = rewrite(generator, item.question, item.history)
+        texts = {
+            "typed": item.question,
+            "rewrite": rewrites[item.id],
+            "standalone": item.standalone,
+        }
+        for condition, text in texts.items():
+            # Wrapped as a Question so the single-turn metrics apply unchanged.
+            question = Question(
+                id=item.id,
+                question=text,
+                expect=item.expect,
+                article_no="",
+                group=condition,
+            )
+            hits = hybrid_search(collection, bm25, embedder, text, top_k, candidates)
+            results[condition].append(Result(question=question, hits=hits))
+    return results, rewrites
+
+
+def report_followups(
+    results: dict[str, list[Result]], rewrites: dict[str, str], top_k: int
+) -> None:
+    print(f"follow-ups {len(rewrites)}")
+    print(f"retrieved  top {top_k}")
+    print(f"\ncondition    any@{top_k}  all@{top_k}  MRR@{top_k}")
+    for condition in CONDITIONS:
+        subset = results[condition]
+        print(
+            f"{condition:<12} {recall(subset, top_k):.2f}"
+            f"   {recall_all(subset, top_k):.2f}   {mrr(subset, top_k):.3f}"
+        )
+    print("  typed      = the follow-up as asked, the control")
+    print("  standalone = the hand-written equivalent, the ceiling")
+
+    # Per item, because the aggregate cannot say whether the rewrite lost to
+    # the ceiling on a pronoun or on an echo of the previous turn's topic.
+    print()
+    for index, item_id in enumerate(rewrites):
+        hit = [
+            condition
+            for condition in CONDITIONS
+            if results[condition][index].recall_at(top_k)
+        ]
+        print(f"  {item_id:<32} hit: {', '.join(hit) or '(none)'}")
+        print(f"    rewrite   {rewrites[item_id]}")
+        lost = results["standalone"][index].recall_at(top_k) and not results["rewrite"][
+            index
+        ].recall_at(top_k)
+        if lost:
+            got = ", ".join(
+                provenance(h) for h in results["rewrite"][index].hits[:top_k]
+            )
+            print(f"    LOST      rewrite missed what standalone found; got {got}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Score retrieval over questions.yaml.")
     parser.add_argument(
@@ -277,10 +409,18 @@ def main() -> int:
         action="store_true",
         help=f"also report recall and MRR at k = {', '.join(map(str, SWEEP))}",
     )
+    parser.add_argument(
+        "--followups",
+        action="store_true",
+        help="score the follow-up rewrite over followups.yaml instead",
+    )
     args = parser.parse_args()
 
     config = load_config()
     top_k = args.top_k if args.top_k is not None else config.top_k
+
+    if args.followups:
+        return main_followups(config, top_k)
 
     questions = load_questions()
     collection = open_collection(config.index_dir, config.scratch_dir)
@@ -307,6 +447,41 @@ def main() -> int:
         )
         sweep({k: widest for k in SWEEP})
 
+    return 0
+
+
+def main_followups(config, top_k: int) -> int:
+    items = load_followups()
+    collection = open_collection(config.index_dir, config.scratch_dir)
+    bm25 = open_bm25(config.chunks_dir)
+    check_gold_exists(
+        [
+            Question(
+                id=i.id, question=i.question, expect=i.expect, article_no="", group=""
+            )
+            for i in items
+        ],
+        collection,
+    )
+    embedder = openai_embedder(config.openai_api_key, config.embed_model)
+    # One rewrite per item and no more, across the whole invocation.
+    generator = CappedGenerator(
+        inner=openai_generator(
+            config.openai_api_key, config.chat_model, config.temperature
+        ),
+        limit=len(items),
+    )
+
+    results, rewrites = run_followups(
+        items,
+        generator,
+        collection,
+        bm25,
+        embedder,
+        top_k,
+        config.fusion_candidates,
+    )
+    report_followups(results, rewrites, top_k)
     return 0
 
 
