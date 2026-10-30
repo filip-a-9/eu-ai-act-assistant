@@ -160,4 +160,4 @@ data/       committed chunks and index; raw HTML is fetched, not committed
 
 Not legal advice. Verify anything you act on against the Official Journal.
 
-Built by [Keel Agents](https://keelagents.pages.dev).
+Built by [Keel Agents](https://keelagents.dev).
