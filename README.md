@@ -159,3 +159,5 @@ data/       committed chunks and index; raw HTML is fetched, not committed
 - English only, one regulation, no user accounts.
 
 Not legal advice. Verify anything you act on against the Official Journal.
+
+Built by [Keel Agents](https://keelagents.pages.dev).
